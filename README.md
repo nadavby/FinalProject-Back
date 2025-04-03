@@ -1,97 +1,110 @@
-# TripBuddy Lost & Found - Backend
+# TripBuddy - AI-powered Lost & Found Platform
 
-This is the backend for the TripBuddy Lost & Found application, which helps users find their lost items or report found items.
+TripBuddy is a platform that helps travelers reconnect with their lost items through advanced AI image recognition and matching.
 
 ## Features
 
-- User authentication (login, registration, profile)
-- Upload images of lost or found items
-- AI-powered image recognition and matching using Google Cloud Vision API
-- Notification system for potential matches
-- Item tracking and management
+- User authentication and account management
+- Lost and found item management
+- AI-powered image analysis and object detection
+- Intelligent matching of lost items with found items
+- Real-time notifications for potential matches
 
-## Tech Stack
+## AI Image Comparison
 
-- **Node.js** - JavaScript runtime
-- **Express** - Web framework
-- **MongoDB** - Database
-- **TypeScript** - Programming language
-- **Google Cloud Vision API** - Image analysis and recognition
-- **JWT** - Authentication
+TripBuddy uses state-of-the-art AI technologies to analyze and compare images:
 
-## API Endpoints
+1. **Google Cloud Vision API** for image analysis and object detection
+2. **OpenCV.js** for advanced feature comparison between images
+3. **Custom scoring algorithms** to determine match probabilities
 
-### Authentication
-- `POST /auth/register` - Register a new user
-- `POST /auth/login` - Login
-- `POST /auth/logout` - Logout
-- `POST /auth/refresh` - Refresh access token
-
-### Lost & Found Items
-- `POST /items/upload-item` - Upload a lost or found item
-- `GET /items` - Get all items (with filtering options)
-- `GET /items/:id` - Get item by ID
-- `PUT /items/:id/resolve` - Mark an item as resolved
-- `PUT /items/:id` - Update an item
-- `DELETE /items/:id` - Delete an item
-
-### Files
-- `POST /file` - Upload files
+The system works by:
+- Extracting objects, labels, and visual characteristics from uploaded images
+- Comparing these features between lost and found items
+- Using a weighted scoring algorithm to determine potential matches
+- Notifying users when high-confidence matches are found
 
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js
+- Node.js (v18+)
 - MongoDB
 - Google Cloud Vision API key
 
 ### Installation
 
 1. Clone the repository
-```
-git clone https://github.com/nadavby/FinalProject-Back.git
-cd FinalProject-Back
+```bash
+git clone https://github.com/yourusername/tripbuddy.git
+cd tripbuddy
 ```
 
 2. Install dependencies
-```
+```bash
 npm install
 ```
 
-3. Configure environment variables
-Create a `.env` file in the root directory with:
+3. Set up environment variables (create a .env file)
 ```
 PORT=3000
 DB_CONNECTION=mongodb://localhost:27017/tripbuddy
 TOKEN_SECRET=your_jwt_secret
 TOKEN_EXPIRATION=1h
 REFRESH_TOKEN_EXPIRATION=7d
+GOOGLE_CLOUD_VISION_API_KEY=your_api_key
 DOMAIN_BASE=http://localhost:3000
-GOOGLE_CLOUD_VISION_API_KEY=your_google_cloud_vision_api_key
 ```
 
-4. Start the server
-```
+4. Start the development server
+```bash
 npm run dev
 ```
 
-5. Access the API documentation at `http://localhost:3000/api-docs`
+## API Documentation
 
-## How It Works
+The API documentation is available at `/api-docs` endpoint when the server is running.
 
-1. Users upload images of lost or found items
-2. The system analyzes the images using Google Cloud Vision API
-3. When a lost item is uploaded, it's compared to all found items
-4. When a found item is uploaded, it's compared to all lost items
-5. If a potential match is found, the original uploader is notified
-6. Users can mark items as resolved when they're found or claimed
+Key endpoints for the image comparison feature:
+
+- `POST /api/image-comparison/analyze` - Analyze an image using Google Cloud Vision API
+- `POST /api/image-comparison/compare` - Compare two images for similarity
+- `GET /api/image-comparison/find-matches/:id` - Find potential matches for a specific item
+
+For frontend developers, see the [Frontend Integration Guide](./README-FRONTEND.md).
+
+## Testing
+
+```bash
+# Run all tests
+npm test
+
+# Run specific test suites
+npm run testAuth
+npm run testItem
+npm run testImageComparison
+```
+
+## Project Structure
+
+```
+src/
+├── controllers/     # Request handlers
+├── models/          # Database models
+├── routes/          # API routes
+├── services/        # Business logic and external services
+├── tests/           # Test files
+└── server.ts        # Server configuration
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/my-feature`)
+3. Commit your changes (`git commit -m 'Add my feature'`)
+4. Push to the branch (`git push origin feature/my-feature`)
+5. Open a Pull Request
 
 ## License
 
-This project is licensed under the ISC License.
-
-## Authors
-
-- Nadav Ben Yehonatan
-- Chamak Sacha 
+This project is licensed under the MIT License - see the LICENSE file for details. 
