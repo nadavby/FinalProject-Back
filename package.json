@@ -5,9 +5,8 @@
   "scripts": {
     "test": "tsc && jest --detectOpenHandles --forceExit --RunInBand --coverage",
     "testAuth": "tsc && jest --detectOpenHandles --forceExit --coverage auth.test.ts",
-    "testPost": "tsc && jest --detectOpenHandles --forceExit post.test.ts",
-    "testComments": "tsc && jest --detectOpenHandles --forceExit --coverage comments.test.ts",
     "testFile": "tsc && jest --detectOpenHandles --forceExit file.test.ts",
+    "testItem": "tsc && jest --detectOpenHandles --forceExit --coverage item.test.ts",
     "start": "tsc && node dist/src/index.js",
     "dev": "nodemon ./src/index.ts",
     "prod": "cp ./.env_prod .env && tsc -p tsconfig_prod.json && pm2 restart ecosystem.config.js --env production",
@@ -26,6 +25,7 @@
     "@types/multer": "^1.4.12",
     "@types/swagger-jsdoc": "^6.0.4",
     "@types/swagger-ui-express": "^4.1.7",
+    "axios": "^1.6.8",
     "babel": "^6.23.0",
     "bcrypt": "^5.1.1",
     "body-parser": "^1.20.3",

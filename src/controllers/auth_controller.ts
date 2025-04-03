@@ -7,8 +7,6 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import { OAuth2Client } from "google-auth-library";
-import postModel from "../models/posts_model";
-import commentModel from "../models/comments_model";
 
 type Payload = {
   _id: string;
