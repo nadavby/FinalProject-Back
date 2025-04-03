@@ -150,17 +150,36 @@ const findPotentialMatches = async (item: IItem): Promise<Array<{ item: IItem, s
 // Controller function to upload a new lost or found item
 const uploadItem = async (req: Request, res: Response) => {
   try {
+    // Detailed request logging
     console.log("Uploading item with body:", JSON.stringify(req.body, null, 2));
-    console.log("File info:", req.file ? JSON.stringify(req.file, null, 2) : "No file provided");
+    console.log("File info:", req.file ? JSON.stringify({
+      fieldname: req.file.fieldname,
+      originalname: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: req.file.size,
+      path: req.file.path
+    }, null, 2) : "No file provided");
     
-    if (!req.body.userId || !req.body.imageUrl || !req.body.itemType) {
-      const missingFields = [];
-      if (!req.body.userId) missingFields.push("userId");
-      if (!req.body.imageUrl) missingFields.push("imageUrl");
-      if (!req.body.itemType) missingFields.push("itemType");
-      
-      console.error("Missing required fields:", missingFields.join(", "));
-      return res.status(400).send(`Missing required fields: ${missingFields.join(", ")}`);
+    // Validate required fields
+    if (!req.body.userId) {
+      console.error("Missing userId in request body");
+      return res.status(400).send("Missing required field: userId");
+    }
+    
+    if (!req.body.imageUrl) {
+      console.error("Missing imageUrl in request body");
+      return res.status(400).send("Missing required field: imageUrl");
+    }
+    
+    // Validate the imageUrl is properly formatted
+    if (typeof req.body.imageUrl !== 'string' || !req.body.imageUrl.trim()) {
+      console.error("Invalid imageUrl format:", req.body.imageUrl);
+      return res.status(400).send("Invalid imageUrl format");
+    }
+    
+    if (!req.body.itemType) {
+      console.error("Missing itemType in request body");
+      return res.status(400).send("Missing required field: itemType");
     }
 
     if (req.body.itemType !== 'lost' && req.body.itemType !== 'found') {
@@ -171,7 +190,16 @@ const uploadItem = async (req: Request, res: Response) => {
     // Analyze the image using Google Cloud Vision API
     let visionApiData = {};
     try {
-      visionApiData = await analyzeImage(req.body.imageUrl);
+      if (!process.env.GOOGLE_CLOUD_VISION_API_KEY) {
+        console.log("Google Cloud Vision API key is not set. Skipping image analysis.");
+        visionApiData = {
+          labels: [],
+          objects: [],
+          colors: []
+        };
+      } else {
+        visionApiData = await analyzeImage(req.body.imageUrl);
+      }
     } catch (error) {
       console.error("Error analyzing image with Vision API:", error);
       // Continue with empty vision data
@@ -182,14 +210,14 @@ const uploadItem = async (req: Request, res: Response) => {
       };
     }
 
-    // Create new item
+    // Create new item (with safer property access)
     const newItem: IItem = {
       userId: req.body.userId,
       imageUrl: req.body.imageUrl,
       itemType: req.body.itemType,
-      description: req.body.description,
-      location: req.body.location,
-      category: req.body.category,
+      description: req.body.description || "",
+      location: req.body.location || "",
+      category: req.body.category || "",
       visionApiData: visionApiData,
       isResolved: false
     };
@@ -210,20 +238,25 @@ const uploadItem = async (req: Request, res: Response) => {
     
     // If we have high-confidence matches, update the item with the best match
     if (potentialMatches.length > 0 && potentialMatches[0].score > 70) {
-      const bestMatch = potentialMatches[0];
-      
-      savedItem.matchedItemId = bestMatch.item._id;
-      await savedItem.save();
-      
-      // Notify the owner of the matched item
       try {
-        const matchedItemOwner = await userModel.findOne({ _id: bestMatch.item.userId });
-        if (matchedItemOwner) {
-          // In a real implementation, send an email or push notification
-          console.log(`Match found! Notifying user: ${matchedItemOwner.email}`);
+        const bestMatch = potentialMatches[0];
+        
+        savedItem.matchedItemId = bestMatch.item._id;
+        await savedItem.save();
+        
+        // Notify the owner of the matched item
+        try {
+          const matchedItemOwner = await userModel.findOne({ _id: bestMatch.item.userId });
+          if (matchedItemOwner) {
+            // In a real implementation, send an email or push notification
+            console.log(`Match found! Notifying user: ${matchedItemOwner.email}`);
+          }
+        } catch (err) {
+          console.error("Error notifying matched item owner:", err);
         }
-      } catch (err) {
-        console.error("Error notifying matched item owner:", err);
+      } catch (matchError) {
+        console.error("Error processing best match:", matchError);
+        // Continue without updating match
       }
     }
 

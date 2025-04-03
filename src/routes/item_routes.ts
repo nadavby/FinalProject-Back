@@ -87,7 +87,16 @@ const storage = multer.diskStorage({
     cb(null, Date.now() + "." + ext);
   },
 });
-const upload = multer({ storage: storage });
+
+// Configure multer to be more flexible with field names
+const upload = multer({ 
+  storage: storage,
+  fileFilter: function(req, file, cb) {
+    // Log the field name for debugging
+    console.log("Received file with field name:", file.fieldname);
+    cb(null, true);
+  }
+});
 
 /**
  * @swagger
@@ -154,9 +163,16 @@ const upload = multer({ storage: storage });
  */
 router.post("/upload-item", authMiddleware, upload.single("file"), async (req, res) => {
   try {
+    // Log the request body and files for debugging
+    console.log("Request body:", JSON.stringify(req.body));
+    console.log("Request file:", req.file);
+    
     if (!req.file) {
       return res.status(400).send("Missing required file");
     }
+    
+    // Debug authentication
+    console.log("User authenticated with ID:", req.userId);
     
     const imageUrl = base + req.file.path;
     req.body.imageUrl = imageUrl;
@@ -232,15 +248,32 @@ router.post("/upload-item", authMiddleware, upload.single("file"), async (req, r
  *       500:
  *         description: Server error
  */
-router.post("/", authMiddleware, upload.single("file"), async (req, res) => {
+router.post("/", authMiddleware, upload.fields([
+  { name: 'file', maxCount: 1 },
+  { name: 'image', maxCount: 1 }
+]), async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).send("Missing required file");
+    console.log("Processing item upload with authorization:", req.header("authorization") ? "Present" : "Missing");
+    console.log("Request body:", JSON.stringify(req.body));
+    console.log("Request files:", req.files);
+    
+    // Get the file from either the "file" or "image" field
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+    const file = files?.file?.[0] || files?.image?.[0];
+    
+    if (!file) {
+      return res.status(400).send("Missing required file. Please upload an image with field name 'file' or 'image'.");
     }
     
-    const imageUrl = base + req.file.path;
+    // Debug authentication
+    console.log("User authenticated with ID:", req.userId);
+    
+    const imageUrl = base + file.path;
     req.body.imageUrl = imageUrl;
     req.body.userId = req.body.userId || req.userId; // Use authenticated user ID if not provided
+    
+    // Store the file in req.file for compatibility with the controller
+    req.file = file;
     
     // Verify required fields are present
     if (!req.body.itemType) {
