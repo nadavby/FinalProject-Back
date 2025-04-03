@@ -153,12 +153,109 @@ const upload = multer({ storage: storage });
  *         description: Server error
  */
 router.post("/upload-item", authMiddleware, upload.single("file"), async (req, res) => {
-  if (req.file) {
+  try {
+    if (!req.file) {
+      return res.status(400).send("Missing required file");
+    }
+    
     const imageUrl = base + req.file.path;
     req.body.imageUrl = imageUrl;
     req.body.userId = req.body.userId || req.userId; // Use authenticated user ID if not provided
+    
+    return uploadItem(req, res);
+  } catch (error) {
+    console.error("Error in upload-item route:", error);
+    return res.status(500).send("Error uploading item: " + (error as Error).message);
   }
-  return uploadItem(req, res);
+});
+
+/**
+ * @swagger
+ * /items:
+ *   post:
+ *     summary: Add a new lost or found item
+ *     description: Alternative endpoint to upload-item, with the same functionality
+ *     tags: [Items]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - file
+ *               - itemType
+ *             properties:
+ *               file:
+ *                 type: string
+ *                 format: binary
+ *                 description: Image of the item
+ *               itemType:
+ *                 type: string
+ *                 enum: [lost, found]
+ *                 description: Whether the item is lost or found
+ *               description:
+ *                 type: string
+ *                 description: Description of the item
+ *               location:
+ *                 type: string
+ *                 description: Location where the item was lost/found
+ *               category:
+ *                 type: string
+ *                 description: Category of the item
+ *     responses:
+ *       201:
+ *         description: Item uploaded successfully with potential matches
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 item:
+ *                   $ref: '#/components/schemas/Item'
+ *                 potentialMatches:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       item:
+ *                         $ref: '#/components/schemas/Item'
+ *                       score:
+ *                         type: number
+ *                         description: Similarity score (0-100)
+ *       400:
+ *         description: Invalid input
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Server error
+ */
+router.post("/", authMiddleware, upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).send("Missing required file");
+    }
+    
+    const imageUrl = base + req.file.path;
+    req.body.imageUrl = imageUrl;
+    req.body.userId = req.body.userId || req.userId; // Use authenticated user ID if not provided
+    
+    // Verify required fields are present
+    if (!req.body.itemType) {
+      return res.status(400).send("Missing required field: itemType");
+    }
+    
+    if (req.body.itemType !== 'lost' && req.body.itemType !== 'found') {
+      return res.status(400).send("Item type must be 'lost' or 'found'");
+    }
+    
+    return uploadItem(req, res);
+  } catch (error) {
+    console.error("Error in /items POST route:", error);
+    return res.status(500).send("Error uploading item: " + (error as Error).message);
+  }
 });
 
 /**
@@ -193,6 +290,54 @@ router.post("/upload-item", authMiddleware, upload.single("file"), async (req, r
  *         description: Server error
  */
 router.get("/", getAllItems);
+
+/**
+ * @swagger
+ * /items/lost:
+ *   get:
+ *     summary: Get all lost items
+ *     description: Retrieve a list of all lost items
+ *     tags: [Items]
+ *     responses:
+ *       200:
+ *         description: A list of lost items
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/Item'
+ *       500:
+ *         description: Server error
+ */
+router.get("/lost", (req, res) => {
+  req.query.itemType = "lost";
+  return getAllItems(req, res);
+});
+
+/**
+ * @swagger
+ * /items/found:
+ *   get:
+ *     summary: Get all found items
+ *     description: Retrieve a list of all found items
+ *     tags: [Items]
+ *     responses:
+ *       200:
+ *         description: A list of found items
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/Item'
+ *       500:
+ *         description: Server error
+ */
+router.get("/found", (req, res) => {
+  req.query.itemType = "found";
+  return getAllItems(req, res);
+});
 
 /**
  * @swagger

@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TripBuddy API Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, select {
+            width: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            background-color: #f9f9f9;
+        }
+        h2 {
+            color: #333;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>TripBuddy API Test</h1>
+    
+    <div>
+        <h2>Register</h2>
+        <div class="form-group">
+            <label for="email">Email:</label>
+            <input type="email" id="email" name="email" required>
+        </div>
+        <div class="form-group">
+            <label for="password">Password:</label>
+            <input type="password" id="password" name="password" required>
+        </div>
+        <div class="form-group">
+            <label for="userName">Username:</label>
+            <input type="text" id="userName" name="userName" required>
+        </div>
+        <button onclick="register()">Register</button>
+        <div id="registerResult" class="result"></div>
+    </div>
+    
+    <div>
+        <h2>Login</h2>
+        <div class="form-group">
+            <label for="loginEmail">Email:</label>
+            <input type="email" id="loginEmail" name="loginEmail" required>
+        </div>
+        <div class="form-group">
+            <label for="loginPassword">Password:</label>
+            <input type="password" id="loginPassword" name="loginPassword" required>
+        </div>
+        <button onclick="login()">Login</button>
+        <div id="loginResult" class="result"></div>
+    </div>
+    
+    <div>
+        <h2>Upload Item</h2>
+        <div class="form-group">
+            <label for="itemType">Item Type:</label>
+            <select id="itemType" name="itemType" required>
+                <option value="lost">Lost</option>
+                <option value="found">Found</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="description">Description:</label>
+            <input type="text" id="description" name="description" required>
+        </div>
+        <div class="form-group">
+            <label for="location">Location:</label>
+            <input type="text" id="location" name="location">
+        </div>
+        <div class="form-group">
+            <label for="category">Category:</label>
+            <input type="text" id="category" name="category">
+        </div>
+        <div class="form-group">
+            <label for="itemImage">Image:</label>
+            <input type="file" id="itemImage" name="itemImage" required>
+        </div>
+        <button onclick="uploadItem()">Upload Item</button>
+        <div id="uploadResult" class="result"></div>
+    </div>
+    
+    <div>
+        <h2>Get Items</h2>
+        <div class="form-group">
+            <label for="itemTypeFilter">Item Type Filter:</label>
+            <select id="itemTypeFilter" name="itemTypeFilter">
+                <option value="">All</option>
+                <option value="lost">Lost</option>
+                <option value="found">Found</option>
+            </select>
+        </div>
+        <button onclick="getItems()">Get Items</button>
+        <div id="getItemsResult" class="result"></div>
+    </div>
+
+    <script>
+        let accessToken = '';
+        let userId = '';
+
+        async function register() {
+            try {
+                const email = document.getElementById('email').value;
+                const password = document.getElementById('password').value;
+                const userName = document.getElementById('userName').value;
+                
+                const response = await fetch('http://localhost:3000/auth/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ email, password, userName })
+                });
+                
+                const data = await response.json();
+                document.getElementById('registerResult').innerText = JSON.stringify(data, null, 2);
+            } catch (error) {
+                document.getElementById('registerResult').innerText = 'Error: ' + error.message;
+            }
+        }
+        
+        async function login() {
+            try {
+                const email = document.getElementById('loginEmail').value;
+                const password = document.getElementById('loginPassword').value;
+                
+                const response = await fetch('http://localhost:3000/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ email, password })
+                });
+                
+                const data = await response.json();
+                accessToken = data.accessToken;
+                userId = data._id;
+                
+                document.getElementById('loginResult').innerText = JSON.stringify(data, null, 2);
+            } catch (error) {
+                document.getElementById('loginResult').innerText = 'Error: ' + error.message;
+            }
+        }
+        
+        async function uploadItem() {
+            try {
+                if (!accessToken) {
+                    document.getElementById('uploadResult').innerText = 'Error: Please login first';
+                    return;
+                }
+                
+                const itemType = document.getElementById('itemType').value;
+                const description = document.getElementById('description').value;
+                const location = document.getElementById('location').value;
+                const category = document.getElementById('category').value;
+                const file = document.getElementById('itemImage').files[0];
+                
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('itemType', itemType);
+                formData.append('description', description);
+                formData.append('location', location);
+                formData.append('category', category);
+                
+                const response = await fetch('http://localhost:3000/items/upload-item', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'JWT ' + accessToken
+                    },
+                    body: formData
+                });
+                
+                const data = await response.json();
+                document.getElementById('uploadResult').innerText = JSON.stringify(data, null, 2);
+            } catch (error) {
+                document.getElementById('uploadResult').innerText = 'Error: ' + error.message;
+            }
+        }
+        
+        async function getItems() {
+            try {
+                const itemTypeFilter = document.getElementById('itemTypeFilter').value;
+                let url = 'http://localhost:3000/items';
+                
+                if (itemTypeFilter) {
+                    url += `?itemType=${itemTypeFilter}`;
+                }
+                
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                document.getElementById('getItemsResult').innerText = JSON.stringify(data, null, 2);
+            } catch (error) {
+                document.getElementById('getItemsResult').innerText = 'Error: ' + error.message;
+            }
+        }
+    </script>
+</body>
+</html> 
