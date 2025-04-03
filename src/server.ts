@@ -12,6 +12,7 @@ import swaggerUI from "swagger-ui-express";
 import fileRoutes from "./routes/file_routes";
 import chatRoutes from "./routes/chatbot_routes";
 import itemRoutes from "./routes/item_routes";
+import imageComparisonRoutes from "./routes/image_comparison_routes";
 //import cors from "cors";
 //import path from "path";
 
@@ -39,6 +40,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use("/auth", authRoutes);
 app.use("/file", fileRoutes);
 app.use("/items", itemRoutes);
+app.use("/api/image-comparison", imageComparisonRoutes);
 app.use("/public", express.static("public"));
 app.use("/chatbot", chatRoutes);
 /*

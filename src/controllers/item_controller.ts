@@ -2,6 +2,8 @@ import { Request, Response } from "express";
 import itemModel, { IItem } from "../models/item_model";
 import axios from "axios";
 import userModel from "../models/user_model";
+import imageComparisonService from "../services/image-comparison.service";
+import { enhanceItemWithAI } from "./image_comparison_controller";
 
 // Function to analyze image using Google Cloud Vision API
 const analyzeImage = async (imageUrl: string): Promise<any> => {
@@ -133,14 +135,8 @@ const findPotentialMatches = async (item: IItem): Promise<Array<{ item: IItem, s
       isResolved: false 
     });
     
-    // Calculate similarity scores for each potential match
-    const scoredMatches = potentialMatches.map(match => ({
-      item: match,
-      score: calculateSimilarityScore(item, match)
-    }));
-    
-    // Sort by score (descending) and return top matches
-    return scoredMatches.sort((a, b) => b.score - a.score);
+    // Use the enhanced image comparison service for more accurate matching
+    return await imageComparisonService.findMatchesForItem(item, potentialMatches);
   } catch (error) {
     console.error("Error finding potential matches:", error);
     return [];
@@ -187,28 +183,8 @@ const uploadItem = async (req: Request, res: Response) => {
       return res.status(400).send("Item type must be 'lost' or 'found'");
     }
 
-    // Analyze the image using Google Cloud Vision API
-    let visionApiData = {};
-    try {
-      if (!process.env.GOOGLE_CLOUD_VISION_API_KEY) {
-        console.log("Google Cloud Vision API key is not set. Skipping image analysis.");
-        visionApiData = {
-          labels: [],
-          objects: [],
-          colors: []
-        };
-      } else {
-        visionApiData = await analyzeImage(req.body.imageUrl);
-      }
-    } catch (error) {
-      console.error("Error analyzing image with Vision API:", error);
-      // Continue with empty vision data
-      visionApiData = {
-        labels: [],
-        objects: [],
-        colors: []
-      };
-    }
+    // Analyze the image using our enhanced AI service
+    const visionApiData = await enhanceItemWithAI(req.body.imageUrl);
 
     // Create new item (with safer property access)
     const newItem: IItem = {
@@ -218,7 +194,7 @@ const uploadItem = async (req: Request, res: Response) => {
       description: req.body.description || "",
       location: req.body.location || "",
       category: req.body.category || "",
-      visionApiData: visionApiData,
+      visionApiData: visionApiData.visionApiData,
       isResolved: false
     };
 
@@ -226,7 +202,7 @@ const uploadItem = async (req: Request, res: Response) => {
     const savedItem = await itemModel.create(newItem);
     console.log("Item saved successfully with ID:", savedItem._id);
 
-    // Find potential matches
+    // Find potential matches using our enhanced comparison
     let potentialMatches: Array<{ item: IItem, score: number }> = [];
     try {
       potentialMatches = await findPotentialMatches(savedItem);
