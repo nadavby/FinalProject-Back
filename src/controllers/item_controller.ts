@@ -143,6 +143,20 @@ const findPotentialMatches = async (item: IItem): Promise<Array<{ item: IItem, s
   }
 };
 
+// Helper function to format items for the frontend
+const formatItemForUI = (item: IItem) => {
+  // Create a properly typed version with all properties from the original item
+  const formattedItem = {
+    ...item,
+    // Add UI-friendly field names while keeping the original properties
+    name: item.description || '',
+    imgURL: item.imageUrl || '',
+    id: item._id
+  };
+  
+  return formattedItem;
+};
+
 // Controller function to upload a new lost or found item
 const uploadItem = async (req: Request, res: Response) => {
   try {
@@ -238,8 +252,14 @@ const uploadItem = async (req: Request, res: Response) => {
 
     // Return the created item along with potential matches
     return res.status(201).json({
-      item: savedItem,
-      potentialMatches: potentialMatches.filter(match => match.score > 50).slice(0, 5)
+      item: formatItemForUI(savedItem),
+      potentialMatches: potentialMatches
+        .filter(match => match.score > 50)
+        .slice(0, 5)
+        .map(match => ({
+          item: formatItemForUI(match.item),
+          score: match.score
+        }))
     });
   } catch (error) {
     console.error("Error uploading item:", error);
@@ -263,32 +283,35 @@ const getAllItems = async (req: Request, res: Response) => {
       query.userId = userId;
     }
     
-    const items = await itemModel.find(query).sort({ createdAt: -1 });
-    res.status(200).json(items);
+    const items = await itemModel.find(query);
+    
+    // Format items for the frontend
+    const formattedItems = items.map(formatItemForUI);
+    
+    return res.status(200).json(formattedItems);
   } catch (error) {
     console.error("Error getting items:", error);
-    res.status(500).send("Error getting items: " + (error as Error).message);
+    return res.status(500).send("Error fetching items: " + (error as Error).message);
   }
 };
 
 // Controller function to get a specific item by ID
 const getItemById = async (req: Request, res: Response) => {
   try {
-    const item = await itemModel.findById(req.params.id);
+    const itemId = req.params.id;
+    const item = await itemModel.findById(itemId);
+    
     if (!item) {
       return res.status(404).send("Item not found");
     }
     
-    // If this item has a matched item, include it in the response
-    let matchedItem = null;
-    if (item.matchedItemId) {
-      matchedItem = await itemModel.findById(item.matchedItemId);
-    }
+    // Format item for the frontend
+    const formattedItem = formatItemForUI(item);
     
-    res.status(200).json({ item, matchedItem });
+    return res.status(200).json(formattedItem);
   } catch (error) {
-    console.error("Error getting item:", error);
-    res.status(500).send("Error getting item: " + (error as Error).message);
+    console.error("Error getting item by ID:", error);
+    return res.status(500).send("Error fetching item: " + (error as Error).message);
   }
 };
 
