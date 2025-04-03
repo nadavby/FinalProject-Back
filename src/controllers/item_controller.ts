@@ -7,7 +7,12 @@ import userModel from "../models/user_model";
 const analyzeImage = async (imageUrl: string): Promise<any> => {
   try {
     if (!process.env.GOOGLE_CLOUD_VISION_API_KEY) {
-      throw new Error("Google Cloud Vision API key is not set");
+      console.log("Google Cloud Vision API key is not set. Skipping image analysis.");
+      return {
+        labels: [],
+        objects: [],
+        colors: []
+      };
     }
 
     const apiUrl = `https://vision.googleapis.com/v1/images:annotate?key=${process.env.GOOGLE_CLOUD_VISION_API_KEY}`;
@@ -145,16 +150,37 @@ const findPotentialMatches = async (item: IItem): Promise<Array<{ item: IItem, s
 // Controller function to upload a new lost or found item
 const uploadItem = async (req: Request, res: Response) => {
   try {
+    console.log("Uploading item with body:", JSON.stringify(req.body, null, 2));
+    console.log("File info:", req.file ? JSON.stringify(req.file, null, 2) : "No file provided");
+    
     if (!req.body.userId || !req.body.imageUrl || !req.body.itemType) {
-      return res.status(400).send("Missing required fields");
+      const missingFields = [];
+      if (!req.body.userId) missingFields.push("userId");
+      if (!req.body.imageUrl) missingFields.push("imageUrl");
+      if (!req.body.itemType) missingFields.push("itemType");
+      
+      console.error("Missing required fields:", missingFields.join(", "));
+      return res.status(400).send(`Missing required fields: ${missingFields.join(", ")}`);
     }
 
     if (req.body.itemType !== 'lost' && req.body.itemType !== 'found') {
+      console.error("Invalid itemType:", req.body.itemType);
       return res.status(400).send("Item type must be 'lost' or 'found'");
     }
 
     // Analyze the image using Google Cloud Vision API
-    const visionApiData = await analyzeImage(req.body.imageUrl);
+    let visionApiData = {};
+    try {
+      visionApiData = await analyzeImage(req.body.imageUrl);
+    } catch (error) {
+      console.error("Error analyzing image with Vision API:", error);
+      // Continue with empty vision data
+      visionApiData = {
+        labels: [],
+        objects: [],
+        colors: []
+      };
+    }
 
     // Create new item
     const newItem: IItem = {
@@ -168,10 +194,19 @@ const uploadItem = async (req: Request, res: Response) => {
       isResolved: false
     };
 
+    console.log("Creating new item:", JSON.stringify(newItem, null, 2));
     const savedItem = await itemModel.create(newItem);
+    console.log("Item saved successfully with ID:", savedItem._id);
 
     // Find potential matches
-    const potentialMatches = await findPotentialMatches(savedItem);
+    let potentialMatches: Array<{ item: IItem, score: number }> = [];
+    try {
+      potentialMatches = await findPotentialMatches(savedItem);
+    } catch (error) {
+      console.error("Error finding potential matches:", error);
+      // Continue without matches
+      potentialMatches = [];
+    }
     
     // If we have high-confidence matches, update the item with the best match
     if (potentialMatches.length > 0 && potentialMatches[0].score > 70) {
