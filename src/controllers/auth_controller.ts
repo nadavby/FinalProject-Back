@@ -97,11 +97,14 @@ const generateToken = (
   if (!process.env.TOKEN_SECRET || !process.env.TOKEN_EXPIRATION) {
     return null;
   }
+  
+  console.log("Generating new token with expiration:", process.env.TOKEN_EXPIRATION);
+  
   const random = Math.floor(Math.random() * 1000000);
   const accessToken = jwt.sign(
     { _id: _id, random: random },
     process.env.TOKEN_SECRET,
-    { expiresIn: process.env.TOKEN_EXPIRATION }
+    { expiresIn: "24h" } // Override with 24 hours for testing
   );
   const refreshToken = jwt.sign(
     { _id: _id, random: random },
@@ -246,24 +249,116 @@ export const authMiddleware = (
 ) => {
   const authorization = req.header("authorization");
   if (!authorization) {
+    console.error("Auth error: Missing authorization header");
     res.status(401).send("Unauthorized - Missing authorization header");
     return;
   }
-  const token = authorization && authorization.split(" ")[1];
+  
+  const parts = authorization.split(" ");
+  if (parts.length !== 2) {
+    console.error("Auth error: Invalid authorization format", authorization);
+    res.status(401).send("Unauthorized - Invalid authorization format. Expected 'Bearer [token]' or 'JWT [token]'");
+    return;
+  }
+  
+  const prefix = parts[0];
+  const token = parts[1];
+  
+  // Accept both 'Bearer' and 'JWT' prefixes
+  if (prefix !== 'Bearer' && prefix !== 'JWT') {
+    console.error(`Auth error: Invalid token prefix "${prefix}"`, authorization);
+    res.status(401).send("Unauthorized - Invalid token prefix. Expected 'Bearer' or 'JWT'");
+    return;
+  }
+  
   if (!token) {
-    res.status(401).send("Unauthorized - Invalid authorization format");
+    console.error("Auth error: Empty token");
+    res.status(401).send("Unauthorized - Empty token");
     return;
   }
+  
   if (!process.env.TOKEN_SECRET) {
-    res.status(500).send("server error");
+    console.error("Auth error: TOKEN_SECRET not set in environment");
+    res.status(500).send("Server configuration error - TOKEN_SECRET not set");
     return;
   }
-  jwt.verify(token, process.env.TOKEN_SECRET, (err, payload) => {
-    if (err) {
-      res.status(401).send("Unauthorized - Invalid or expired token");
-      return;
+  
+  // Get the refresh token from the request, if present
+  const refreshToken = req.header("refresh-token");
+  
+  // Verify the JWT token
+  jwt.verify(token, process.env.TOKEN_SECRET, async (err, payload) => {
+    // If token expired and we have a refresh token, try to refresh
+    if (err && err.name === "TokenExpiredError" && refreshToken) {
+      console.log("Token expired, attempting refresh with provided refresh token");
+      try {
+        // Verify the refresh token
+        const refreshPayload = jwt.verify(refreshToken, process.env.TOKEN_SECRET!);
+        if (!refreshPayload || typeof refreshPayload !== 'object' || !('_id' in refreshPayload)) {
+          console.error("Invalid refresh token payload structure");
+          return res.status(401).send("Unauthorized - Invalid refresh token");
+        }
+        
+        // Find the user
+        const user = await userModel.findOne({ _id: (refreshPayload as Payload)._id });
+        if (!user) {
+          console.error("User not found for refresh token");
+          return res.status(401).send("Unauthorized - Invalid refresh token");
+        }
+        
+        // Check if the refresh token is in the user's refresh tokens
+        if (!user.refreshToken || !user.refreshToken.includes(refreshToken)) {
+          console.error("Refresh token not found in user's refresh tokens");
+          return res.status(401).send("Unauthorized - Invalid refresh token");
+        }
+        
+        // Generate new tokens
+        const tokens = generateToken(user._id);
+        if (!tokens) {
+          console.error("Failed to generate new tokens");
+          return res.status(500).send("Server error - Failed to generate new tokens");
+        }
+        
+        // Update user's refresh tokens
+        user.refreshToken = user.refreshToken.filter(t => t !== refreshToken);
+        user.refreshToken.push(tokens.refreshToken);
+        await user.save();
+        
+        // Set the new tokens in the response headers
+        res.setHeader("new-access-token", tokens.accessToken);
+        res.setHeader("new-refresh-token", tokens.refreshToken);
+        
+        // Continue with the authenticated request
+        req.userId = user._id;
+        console.log(`User authenticated via token refresh: ${req.userId}`);
+        return next();
+      } catch (refreshErr) {
+        console.error("Error refreshing token:", refreshErr);
+        return res.status(401).send("Unauthorized - Invalid or expired refresh token");
+      }
     }
+    
+    // Handle other verification errors
+    if (err) {
+      console.error("Auth error: Token verification failed", err);
+      if (err.name === "TokenExpiredError") {
+        return res.status(401).send("Unauthorized - Token expired");
+      } else if (err.name === "JsonWebTokenError") {
+        return res.status(401).send("Unauthorized - Invalid token");
+      } else {
+        return res.status(401).send(`Unauthorized - ${err.message}`);
+      }
+    }
+    
+    // Validate payload
+    if (!payload || typeof payload !== 'object' || !('_id' in payload)) {
+      console.error("Auth error: Invalid payload structure", payload);
+      return res.status(401).send("Unauthorized - Invalid token payload");
+    }
+    
+    // Authentication successful
     req.userId = (payload as Payload)._id;
+    console.log(`User authenticated: ${req.userId}`);
     next();
   });
 };
