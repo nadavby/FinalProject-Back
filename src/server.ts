@@ -13,6 +13,8 @@ import fileRoutes from "./routes/file_routes";
 import chatRoutes from "./routes/chatbot_routes";
 import itemRoutes from "./routes/item_routes";
 import imageComparisonRoutes from "./routes/image_comparison_routes";
+import http from "http";
+import { initSocket } from "./services/socket.service";
 //import cors from "cors";
 //import path from "path";
 

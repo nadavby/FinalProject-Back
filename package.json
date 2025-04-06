@@ -46,6 +46,7 @@
     "opencv-wasm": "^4.3.0-10",
     "opencv.js": "^1.2.1",
     "prettier": "^3.4.2",
+    "socket.io": "^4.8.1",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
     "ts-node": "^10.9.2",

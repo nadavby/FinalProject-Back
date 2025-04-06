@@ -132,7 +132,7 @@ router.post('/analyze', authMiddleware, analyzeImage);
 
 /**
  * @swagger
- * /api/image-comparison/find-matches/{id}:
+ * /api/image-comparison/find-matches/{itemId}:
  *   get:
  *     summary: Find matches for an item
  *     description: Find potential matches for a specific item
@@ -141,7 +141,7 @@ router.post('/analyze', authMiddleware, analyzeImage);
  *       - bearerAuth: []
  *     parameters:
  *       - in: path
- *         name: id
+ *         name: itemId
  *         required: true
  *         schema:
  *           type: string
@@ -155,14 +155,56 @@ router.post('/analyze', authMiddleware, analyzeImage);
  *               type: object
  *               properties:
  *                 item:
- *                   $ref: '#/components/schemas/Item'
+ *                   type: object
+ *                   properties:
+ *                     _id:
+ *                       type: string
+ *                     name:
+ *                       type: string
+ *                     description:
+ *                       type: string
+ *                     category:
+ *                       type: string
+ *                     location:
+ *                       type: string
+ *                     date:
+ *                       type: string
+ *                       format: date-time
+ *                     itemType:
+ *                       type: string
+ *                       enum: [lost, found]
+ *                     imgURL:
+ *                       type: string
  *                 matches:
  *                   type: array
  *                   items:
  *                     type: object
  *                     properties:
  *                       item:
- *                         $ref: '#/components/schemas/Item'
+ *                         type: object
+ *                         properties:
+ *                           _id:
+ *                             type: string
+ *                           name:
+ *                             type: string
+ *                           description:
+ *                             type: string
+ *                           category:
+ *                             type: string
+ *                           location:
+ *                             type: string
+ *                           date:
+ *                             type: string
+ *                             format: date-time
+ *                           itemType:
+ *                             type: string
+ *                             enum: [lost, found]
+ *                           imgURL:
+ *                             type: string
+ *                           ownerName:
+ *                             type: string
+ *                           ownerEmail:
+ *                             type: string
  *                       score:
  *                         type: number
  *                         description: Similarity score (0-100)
@@ -175,6 +217,6 @@ router.post('/analyze', authMiddleware, analyzeImage);
  *       500:
  *         description: Server error
  */
-router.get('/find-matches/:id', authMiddleware, findMatches);
+router.get('/find-matches/:itemId', authMiddleware, findMatches);
 
 export = router; 

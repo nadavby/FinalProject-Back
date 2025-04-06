@@ -9,6 +9,8 @@ export interface IItem {
   location?: string;
   category?: string;
   timestamp?: Date;
+  ownerName?: string;
+  ownerEmail?: string;
   visionApiData?: {
     labels?: string[];
     objects?: Array<{
@@ -53,6 +55,12 @@ const itemSchema = new mongoose.Schema<IItem>(
       type: String,
     },
     category: {
+      type: String,
+    },
+    ownerName: {
+      type: String,
+    },
+    ownerEmail: {
       type: String,
     },
     visionApiData: {

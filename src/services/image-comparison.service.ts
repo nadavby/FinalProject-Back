@@ -123,17 +123,18 @@ export class ImageComparisonService {
     this.apiKey = process.env.GOOGLE_CLOUD_VISION_API_KEY || '';
     if (!this.apiKey) {
       console.error('GOOGLE_CLOUD_VISION_API_KEY is not set in environment variables');
-    } else if (this.apiKey === 'your_google_cloud_vision_api_key') {
-      console.error('GOOGLE_CLOUD_VISION_API_KEY is set to placeholder value');
-      this.apiKey = '';
-    } else {
-      console.log('Google Cloud Vision API key loaded successfully');
     }
 
+    // Initialize other properties
     this.cvInitialized = false;
     this.analysisCache = {};
     this.cacheExpirationMs = 1000 * 60 * 60 * 24; // 24 hours cache expiration
     this.initializeOpenCV();
+
+    // Validate API key format
+    if (this.apiKey && !/^AIza[0-9A-Za-z-_]{35}$/.test(this.apiKey)) {
+      console.error('GOOGLE_CLOUD_VISION_API_KEY appears to be in an invalid format');
+    }
   }
 
   private async initializeOpenCV(): Promise<void> {
@@ -200,173 +201,181 @@ export class ImageComparisonService {
     }
 
     if (!this.apiKey) {
-      console.error('Google Cloud Vision API key not set or invalid');
-      return { labels: [], objects: [], webEntities: [], bestGuessLabels: [], dominantColors: [], safeSearch: undefined };
+      console.error('Cannot analyze image: API key is not configured');
+      return this.getEmptyImageData();
     }
 
     try {
-      // Extract the file path from the URL and read the file
-      let filePath: string;
-      
-      try {
-        // Try to parse as a URL first
-        const urlPath = new URL(normalizedUrl).pathname;
-        filePath = path.join(process.cwd(), urlPath.replace(/^\//, ''));
-      } catch (e) {
-        // If not a valid URL, try to use the normalized URL directly as a path
-        console.log('URL parsing failed, using normalized URL as path');
-        filePath = normalizedUrl;
+      // Extract file path from URL if it's a local file
+      let imagePath = '';
+      if (normalizedUrl.startsWith('http://localhost')) {
+        const publicIndex = normalizedUrl.indexOf('/public/');
+        if (publicIndex !== -1) {
+          imagePath = path.join(
+            process.cwd(),
+            'public',
+            decodeURIComponent(normalizedUrl.slice(publicIndex + '/public/'.length))
+          );
+        }
       }
-      
-      console.log('Reading file from:', filePath);
 
-      // Read the file and convert to base64
+      // Read the image file
       let imageBuffer: Buffer;
       try {
-        imageBuffer = await fs.promises.readFile(filePath);
-        console.log(`Successfully read image file (${imageBuffer.length} bytes)`);
-      } catch (err) {
-        console.error('Error reading image file:', err);
-        console.log('Attempting fallback direct read from URL path...');
-        
-        // Fallback approach - try a simpler path parsing
-        const simplePath = normalizedUrl.replace(/^https?:\/\/[^\/]+\//, '');
-        const fallbackPath = path.join(process.cwd(), simplePath);
-        console.log('Fallback path:', fallbackPath);
-        
-        imageBuffer = await fs.promises.readFile(fallbackPath);
-        console.log(`Successfully read image file using fallback path (${imageBuffer.length} bytes)`);
+        console.log('Attempting to read image from path:', imagePath);
+        imageBuffer = fs.readFileSync(imagePath);
+      } catch (error) {
+        console.error('Error reading image file:', error);
+        throw new Error(`Failed to read image file: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
-      
-      const imageContent = imageBuffer.toString('base64');
-      console.log(`Converted image to base64 (length: ${imageContent.length})`);
 
-      console.log('Sending Vision API request...');
-      const apiUrl = `https://vision.googleapis.com/v1/images:annotate?key=${this.apiKey}`;
-      
-      const requestData = {
+      // Encode image as base64
+      const encodedImage = imageBuffer.toString('base64');
+
+      // Prepare the request to Google Cloud Vision API
+      const visionRequest = {
         requests: [{
           image: {
-            content: imageContent
+            content: encodedImage
           },
           features: [
-            { type: "LABEL_DETECTION", maxResults: 20 },
-            { type: "OBJECT_LOCALIZATION", maxResults: 15 },
-            { type: "WEB_DETECTION", maxResults: 15 },
-            { type: "IMAGE_PROPERTIES", maxResults: 5 },
-            { type: "SAFE_SEARCH_DETECTION" }
+            { type: 'LABEL_DETECTION', maxResults: 10 },
+            { type: 'OBJECT_LOCALIZATION', maxResults: 10 },
+            { type: 'WEB_DETECTION', maxResults: 10 },
+            { type: 'IMAGE_PROPERTIES' },
+            { type: 'SAFE_SEARCH_DETECTION' }
           ]
         }]
       };
 
-      console.log('Vision API request data:', JSON.stringify({
-        ...requestData,
-        requests: [{
-          ...requestData.requests[0],
-          image: { content: 'BASE64_CONTENT_REDACTED' }
-        }]
-      }, null, 2));
-
-      console.log('Sending API request to:', apiUrl);
-      console.log('Using request headers:', {
-        'Accept': 'application/json',
+      // Make the API request with proper headers
+      console.log('Sending request to Vision API...');
+      console.log('Request headers:', {
         'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'X-Goog-Api-Key': '***API_KEY_HIDDEN***',
         'Referer': process.env.DOMAIN_BASE || 'http://localhost:3000',
         'Origin': process.env.DOMAIN_BASE || 'http://localhost:3000'
       });
-      
-      try {
-        const response = await axios.post<VisionApiResponse>(apiUrl, requestData, {
+
+      const response = await axios.post(
+        `https://vision.googleapis.com/v1/images:annotate?key=${this.apiKey}`,
+        visionRequest,
+        {
           headers: {
-            'Accept': 'application/json',
             'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'X-Goog-Api-Key': this.apiKey,
             'Referer': process.env.DOMAIN_BASE || 'http://localhost:3000',
-            'Origin': process.env.DOMAIN_BASE || 'http://localhost:3000'
-          }
-        });
-
-        console.log('Vision API response status:', response.status);
-        console.log('Vision API response headers:', JSON.stringify(response.headers, null, 2));
-        
-        if (!response.data.responses || response.data.responses.length === 0) {
-          console.error('Empty response from Vision API');
-          return { labels: [], objects: [], webEntities: [], bestGuessLabels: [], dominantColors: [], safeSearch: undefined };
+            'Origin': process.env.DOMAIN_BASE || 'http://localhost:3000',
+            'User-Agent': 'LostAndFound-App/1.0'
+          },
+          timeout: 10000 // 10 second timeout
         }
+      );
 
-        const result = response.data.responses[0];
-        console.log('Vision API response data:', JSON.stringify(result, null, 2));
-
-        const analysisResult = {
-          labels: result.labelAnnotations?.map(label => label.description) || [],
-          objects: result.localizedObjectAnnotations?.map(obj => ({
-            name: obj.name,
-            score: obj.score,
-            boundingBox: {
-              x: obj.boundingPoly.normalizedVertices[0]?.x || 0,
-              y: obj.boundingPoly.normalizedVertices[0]?.y || 0,
-              width: (obj.boundingPoly.normalizedVertices[2]?.x || 0) - (obj.boundingPoly.normalizedVertices[0]?.x || 0),
-              height: (obj.boundingPoly.normalizedVertices[2]?.y || 0) - (obj.boundingPoly.normalizedVertices[0]?.y || 0)
-            }
-          })) || [],
-          webEntities: result.webDetection?.webEntities?.map(entity => entity.description) || [],
-          bestGuessLabels: result.webDetection?.bestGuessLabels?.map(label => label.label) || [],
-          dominantColors: result.imagePropertiesAnnotation?.dominantColors?.colors.map(color => ({
-            color: {
-              red: color.color.red,
-              green: color.color.green,
-              blue: color.color.blue
-            },
-            score: color.score,
-            pixelFraction: color.pixelFraction
-          })) || [],
-          safeSearch: result.safeSearchAnnotation
-        };
-
-        // Perform post-processing to correct common misidentifications
-        this.postProcessAnalysisResult(analysisResult);
-
-        console.log('Final analysis result:', JSON.stringify(analysisResult, null, 2));
-        console.log('=== Vision API Request Complete ===\n');
-
-        // Cache the result
-        this.analysisCache[normalizedUrl] = {
-          timestamp: now,
-          data: analysisResult
-        };
-        
-        return analysisResult;
-      } catch (innerError) {
-        // Re-throw to be caught by the outer try-catch
-        throw innerError;
+      if (!response.data || !response.data.responses) {
+        throw new Error('Invalid response from Vision API');
       }
-    } catch (error: unknown) {
-      console.error('\nError analyzing image with Vision API:', error);
-      if (axios.isAxiosError(error)) {
-        if (error.response) {
-          console.error('Vision API error details:', {
-            status: error.response.status,
-            statusText: error.response.statusText,
-            data: error.response.data,
-            headers: error.response.headers
-          });
-          
-          // Log specific 403 error information
-          if (error.response.status === 403) {
-            console.error('403 Forbidden error detected. Please verify:');
-            console.error('1. Your API key is valid and has Vision API access enabled');
-            console.error('2. Your API key has the correct application restrictions');
-            console.error('3. Your Referer header matches the allowed domains in Google Cloud Console');
-            console.error(`Current Referer: ${process.env.DOMAIN_BASE || 'http://localhost:3000'}`);
+
+      const apiResponse: VisionApiResponse = response.data;
+      if (!apiResponse.responses || apiResponse.responses.length === 0) {
+        throw new Error('No response from Vision API');
+      }
+
+      console.log('Vision API Response Status:', response.status);
+      console.log('Vision API Response Headers:', response.headers);
+
+      const result = apiResponse.responses[0];
+      const analysisResult: ImageData = {
+        labels: (result.labelAnnotations || []).map(label => label.description),
+        objects: (result.localizedObjectAnnotations || []).map(obj => ({
+          name: obj.name,
+          score: obj.score,
+          boundingBox: {
+            x: obj.boundingPoly.normalizedVertices[0]?.x || 0,
+            y: obj.boundingPoly.normalizedVertices[0]?.y || 0,
+            width: Math.abs((obj.boundingPoly.normalizedVertices[1]?.x || 0) - (obj.boundingPoly.normalizedVertices[0]?.x || 0)),
+            height: Math.abs((obj.boundingPoly.normalizedVertices[2]?.y || 0) - (obj.boundingPoly.normalizedVertices[0]?.y || 0))
           }
-        } else if (error.request) {
-          console.error('No response received from Vision API:', error.request);
-        } else {
-          console.error('Error setting up Vision API request:', error.message);
-        }
-        console.error('Vision API request config:', error.config);
-      }
-      return { labels: [], objects: [], webEntities: [], bestGuessLabels: [], dominantColors: [], safeSearch: undefined };
+        })),
+        webEntities: (result.webDetection?.webEntities || []).map(entity => entity.description),
+        bestGuessLabels: (result.webDetection?.bestGuessLabels || []).map(label => label.label),
+        dominantColors: result.imagePropertiesAnnotation?.dominantColors?.colors || [],
+        safeSearch: result.safeSearchAnnotation
+      };
+
+      // Cache the result
+      this.analysisCache[normalizedUrl] = {
+        timestamp: now,
+        data: analysisResult
+      };
+
+      console.log('\nAnalysis results:', JSON.stringify(analysisResult, null, 2));
+      return analysisResult;
+
+    } catch (error) {
+      this.handleVisionApiError(error);
+      return this.getEmptyImageData();
     }
+  }
+
+  private handleVisionApiError(error: unknown): void {
+    console.error('\n=== Vision API Error Details ===');
+    console.error('Error analyzing image with Vision API:', error);
+    
+    if (axios.isAxiosError(error)) {
+      const status = error.response?.status;
+      const data = error.response?.data;
+      const headers = error.response?.headers;
+      
+      console.error('Response Status:', status);
+      console.error('Response Headers:', headers);
+      console.error('Response Data:', data);
+      
+      switch (status) {
+        case 403:
+          console.error('\nAuthentication failed. Please check:');
+          console.error('1. API key is valid and enabled');
+          console.error('2. Vision API is enabled in Google Cloud Console');
+          console.error('3. Billing is enabled for the project');
+          console.error('4. API restrictions are properly configured:');
+          console.error('   - Check allowed referrers in Google Cloud Console');
+          console.error('   - Current referrer:', process.env.DOMAIN_BASE || 'http://localhost:3000');
+          console.error('   - Make sure the domain is added to allowed referrers');
+          console.error('\nRequest Details:');
+          console.error('URL:', error.config?.url);
+          console.error('Headers:', {
+            ...error.config?.headers,
+            'X-Goog-Api-Key': '***API_KEY_HIDDEN***'
+          });
+          break;
+        case 400:
+          console.error('Bad request. The image may be invalid or too large');
+          console.error('Request payload:', error.config?.data);
+          break;
+        case 429:
+          console.error('Rate limit exceeded. Please try again later');
+          break;
+        default:
+          console.error(`API request failed with status ${status}`);
+          if (data) {
+            console.error('Error details:', data);
+          }
+      }
+      console.error('=== End Error Details ===\n');
+    }
+  }
+
+  private getEmptyImageData(): ImageData {
+    return {
+      labels: [],
+      objects: [],
+      webEntities: [],
+      bestGuessLabels: [],
+      dominantColors: [],
+      safeSearch: undefined
+    };
   }
 
   /**
@@ -387,9 +396,39 @@ export class ImageComparisonService {
         this.analyzeImage(image2Url)
       ]);
 
+      // Early return if either analysis failed to return data
+      if (!image1Data || !image2Data) {
+        console.log('⚠️ One or both image analyses failed to return data');
+        return {
+          isMatch: false,
+          score: 0,
+          matchedObjects: []
+        };
+      }
+
       console.log('\nAnalysis results:');
       console.log('Image 1 analysis:', JSON.stringify(image1Data, null, 2));
       console.log('Image 2 analysis:', JSON.stringify(image2Data, null, 2));
+      
+      // Ensure all arrays exist to prevent undefined access
+      image1Data.labels = image1Data.labels || [];
+      image1Data.objects = image1Data.objects || [];
+      image1Data.webEntities = image1Data.webEntities || [];
+      image1Data.bestGuessLabels = image1Data.bestGuessLabels || [];
+      
+      image2Data.labels = image2Data.labels || [];
+      image2Data.objects = image2Data.objects || [];
+      image2Data.webEntities = image2Data.webEntities || [];
+      image2Data.bestGuessLabels = image2Data.bestGuessLabels || [];
+
+      // Special handling for keys
+      const isKey1 = this.isKeyImage(image1Data);
+      const isKey2 = this.isKeyImage(image2Data);
+
+      if (isKey1 && isKey2) {
+        console.log('Both images are identified as keys - performing key-specific comparison');
+        return this.compareKeys(image1Data, image2Data);
+      }
       
       // Categorize the products in both images
       const category1 = this.categorizeProduct(image1Data);
@@ -411,8 +450,11 @@ export class ImageComparisonService {
         console.log(`✗ Different product categories: ${category1.category} vs ${category2.category}`);
       }
       
-      // Compare dominant colors
-      const colorComparison = this.compareDominantColors(image1Data.dominantColors, image2Data.dominantColors);
+      // Compare dominant colors safely
+      const colorComparison = this.compareDominantColors(
+        image1Data.dominantColors || [],
+        image2Data.dominantColors || []
+      );
       
       console.log('\nColor comparison:');
       console.log(`- Color similarity score: ${colorComparison.score.toFixed(2)}%`);
@@ -429,14 +471,17 @@ export class ImageComparisonService {
       const electronics1 = this.identifyElectronicsTerms(image1Data);
       const electronics2 = this.identifyElectronicsTerms(image2Data);
       
-      const commonElectronics = electronics1.filter(term => electronics2.includes(term));
+      const commonElectronics = electronics1.filter(term => 
+        term && electronics2.includes(term)
+      );
+      
       if (commonElectronics.length > 0) {
         console.log('\nCommon electronics terms found:', commonElectronics);
       }
 
-      // 2. Compare labels for initial filtering
+      // Compare labels for initial filtering
       const commonLabels = image1Data.labels.filter(label => 
-        image2Data.labels.includes(label)
+        label && image2Data.labels.includes(label)
       );
 
       console.log('\nCommon labels found:', commonLabels.length);
@@ -444,9 +489,9 @@ export class ImageComparisonService {
         console.log('Labels:', commonLabels);
       }
       
-      // Compare web entities for more specific object identification
+      // Compare web entities safely
       const commonWebEntities = image1Data.webEntities.filter(entity => 
-        image2Data.webEntities.includes(entity)
+        entity && image2Data.webEntities.includes(entity)
       );
       
       console.log('\nCommon web entities found:', commonWebEntities.length);
@@ -454,9 +499,9 @@ export class ImageComparisonService {
         console.log('Web Entities:', commonWebEntities);
       }
       
-      // Compare best guess labels
+      // Compare best guess labels safely
       const commonBestGuesses = image1Data.bestGuessLabels.filter(label => 
-        image2Data.bestGuessLabels.includes(label)
+        label && image2Data.bestGuessLabels.includes(label)
       );
       
       console.log('\nCommon best guess labels:', commonBestGuesses.length);
@@ -474,20 +519,20 @@ export class ImageComparisonService {
         };
       }
 
-      // 3. Compare objects
-      const matchedObjects = [];
+      // Initialize arrays for matched objects and scoring
+      const matchedObjects: Array<{ objectName: string; similarityScore: number }> = [];
       let totalScore = 0;
 
-      // First, add common labels as matched objects with high confidence
-      // This is important because labels like "Loudspeaker" are often more accurate than object detection
+      // Add common labels as matched objects with high confidence
       for (const label of commonLabels) {
+        if (!label) continue; // Skip undefined labels
+        
         console.log(`\nAdding label match: ${label}`);
-        // Give higher confidence to certain important labels
         const isSpeakerLabel = label.toLowerCase().includes('speaker') || 
                               label.toLowerCase().includes('audio') ||
                               label.toLowerCase() === 'loudspeaker';
         
-        const labelScore = isSpeakerLabel ? 0.95 : 0.8; // Prioritize speaker-related labels
+        const labelScore = isSpeakerLabel ? 0.95 : 0.8;
         
         matchedObjects.push({
           objectName: label,
@@ -496,35 +541,113 @@ export class ImageComparisonService {
         
         totalScore += labelScore;
         
-        // Log when we find speaker-related labels to track detection
         if (isSpeakerLabel) {
           console.log(`*** Found speaker-related label: ${label} with high confidence ***`);
         }
       }
 
-      console.log('\nComparing detected objects:');
-      console.log('Image 1 objects:', image1Data.objects.map(obj => obj.name));
-      console.log('Image 2 objects:', image2Data.objects.map(obj => obj.name));
-
-      // Check for common object names
-      for (const obj1 of image1Data.objects) {
-        for (const obj2 of image2Data.objects) {
-          // If objects have the same label, compare their features
-          if (obj1.name.toLowerCase() === obj2.name.toLowerCase()) {
-            // Calculate basic score from object detection confidence
-            const objectScore = (obj1.score + obj2.score) / 2;
-            
-            console.log(`\nMatched object: ${obj1.name}`);
-            console.log(`- Object 1 confidence: ${obj1.score}`);
-            console.log(`- Object 2 confidence: ${obj2.score}`);
-            console.log(`- Combined score: ${objectScore * 100}%`);
-            
-            matchedObjects.push({
-              objectName: obj1.name,
-              similarityScore: objectScore * 100
-            });
-            
-            totalScore += objectScore;
+      // Check if we still have wallet objects but have speaker evidence in labels
+      const hasImage1WalletObjects = image1Data.objects.some(obj => 
+        obj.name && obj.name.toLowerCase() === 'wallet'
+      );
+      const hasImage2WalletObjects = image2Data.objects.some(obj => 
+        obj.name && obj.name.toLowerCase() === 'wallet'
+      );
+      
+      const hasImage1SpeakerLabel = image1Data.labels.some(label => 
+        label && (label.toLowerCase() === 'loudspeaker' || label.toLowerCase() === 'speaker')
+      );
+      const hasImage2SpeakerLabel = image2Data.labels.some(label => 
+        label && (label.toLowerCase() === 'loudspeaker' || label.toLowerCase() === 'speaker')
+      );
+      
+      // Last chance correction for wallet vs speaker mismatches
+      if ((hasImage1WalletObjects && hasImage1SpeakerLabel) || 
+          (hasImage2WalletObjects && hasImage2SpeakerLabel)) {
+        console.log('\n⚠️ DETECTED WALLET-SPEAKER CONFLICT IN COMPARISON STAGE');
+        console.log('This suggests the post-processing didn\'t catch all misidentifications');
+        
+        // Override the object types for matching purposes
+        const correctedImage1Objects = [...image1Data.objects];
+        const correctedImage2Objects = [...image2Data.objects];
+        
+        // Correct Image 1 objects if needed
+        if (hasImage1WalletObjects && hasImage1SpeakerLabel) {
+          console.log('Converting Wallet objects to Loudspeaker in Image 1 for comparison');
+          for (let i = 0; i < correctedImage1Objects.length; i++) {
+            if (correctedImage1Objects[i].name && correctedImage1Objects[i].name.toLowerCase() === 'wallet') {
+              correctedImage1Objects[i] = {
+                ...correctedImage1Objects[i],
+                name: 'Loudspeaker',
+                score: 0.95
+              };
+            }
+          }
+        }
+        
+        // Correct Image 2 objects if needed
+        if (hasImage2WalletObjects && hasImage2SpeakerLabel) {
+          console.log('Converting Wallet objects to Loudspeaker in Image 2 for comparison');
+          for (let i = 0; i < correctedImage2Objects.length; i++) {
+            if (correctedImage2Objects[i].name && correctedImage2Objects[i].name.toLowerCase() === 'wallet') {
+              correctedImage2Objects[i] = {
+                ...correctedImage2Objects[i],
+                name: 'Loudspeaker',
+                score: 0.95
+              };
+            }
+          }
+        }
+        
+        // Use corrected objects for comparison
+        console.log('Using corrected objects for comparison:');
+        console.log('Image 1 corrected objects:', correctedImage1Objects.map(obj => obj.name));
+        console.log('Image 2 corrected objects:', correctedImage2Objects.map(obj => obj.name));
+        
+        // Check for common object names with corrected objects
+        for (const obj1 of correctedImage1Objects) {
+          for (const obj2 of correctedImage2Objects) {
+            // If objects have the same label, compare their features
+            if (obj1.name && obj2.name && obj1.name.toLowerCase() === obj2.name.toLowerCase()) {
+              // Calculate basic score from object detection confidence
+              const objectScore = (obj1.score + obj2.score) / 2;
+              
+              console.log(`\nMatched object: ${obj1.name}`);
+              console.log(`- Object 1 confidence: ${obj1.score}`);
+              console.log(`- Object 2 confidence: ${obj2.score}`);
+              console.log(`- Combined score: ${objectScore * 100}%`);
+              
+              matchedObjects.push({
+                objectName: obj1.name,
+                similarityScore: objectScore * 100
+              });
+              
+              totalScore += objectScore;
+            }
+          }
+        }
+      } else {
+        // Normal object comparison if no wallet-speaker conflict
+        // Check for common object names
+        for (const obj1 of image1Data.objects) {
+          for (const obj2 of image2Data.objects) {
+            // If objects have the same label, compare their features
+            if (obj1.name && obj2.name && obj1.name.toLowerCase() === obj2.name.toLowerCase()) {
+              // Calculate basic score from object detection confidence
+              const objectScore = (obj1.score + obj2.score) / 2;
+              
+              console.log(`\nMatched object: ${obj1.name}`);
+              console.log(`- Object 1 confidence: ${obj1.score}`);
+              console.log(`- Object 2 confidence: ${obj2.score}`);
+              console.log(`- Combined score: ${objectScore * 100}%`);
+              
+              matchedObjects.push({
+                objectName: obj1.name,
+                similarityScore: objectScore * 100
+              });
+              
+              totalScore += objectScore;
+            }
           }
         }
       }
@@ -655,6 +778,110 @@ export class ImageComparisonService {
   }
 
   /**
+   * Helper method to determine if an image is of a key
+   */
+  private isKeyImage(data: ImageData): boolean {
+    const keyTerms = ['key', 'keys', 'car key', 'lock and key', 'car alarm'];
+    
+    // Check labels
+    const hasKeyLabel = data.labels.some(label => 
+      keyTerms.some(term => label?.toLowerCase().includes(term.toLowerCase()))
+    );
+
+    // Check web entities
+    const hasKeyEntity = data.webEntities.some(entity => 
+      entity && keyTerms.some(term => entity.toLowerCase().includes(term.toLowerCase()))
+    );
+
+    // Check best guess labels
+    const hasKeyBestGuess = data.bestGuessLabels.some(label => 
+      label && keyTerms.some(term => label.toLowerCase().includes(term.toLowerCase()))
+    );
+
+    const isKey = hasKeyLabel || hasKeyEntity || hasKeyBestGuess;
+    
+    if (isKey) {
+      console.log('Key detection evidence:');
+      if (hasKeyLabel) console.log('- Found key in labels');
+      if (hasKeyEntity) console.log('- Found key in web entities');
+      if (hasKeyBestGuess) console.log('- Found key in best guess labels');
+    }
+
+    return isKey;
+  }
+
+  /**
+   * Special comparison method for keys
+   */
+  private compareKeys(image1Data: ImageData, image2Data: ImageData): ComparisonResult {
+    console.log('\nPerforming key-specific comparison...');
+    
+    const matchedObjects: Array<{ objectName: string; similarityScore: number }> = [];
+    let totalScore = 0;
+
+    // Compare key-specific labels
+    const keyLabels1 = image1Data.labels.filter(label => 
+      label && ['key', 'car key', 'lock and key', 'car alarm'].some(term => 
+        label.toLowerCase().includes(term.toLowerCase())
+      )
+    );
+    
+    const keyLabels2 = image2Data.labels.filter(label => 
+      label && ['key', 'car key', 'lock and key', 'car alarm'].some(term => 
+        label.toLowerCase().includes(term.toLowerCase())
+      )
+    );
+
+    console.log('Key labels in image 1:', keyLabels1);
+    console.log('Key labels in image 2:', keyLabels2);
+
+    // Add matching key labels
+    for (const label1 of keyLabels1) {
+      for (const label2 of keyLabels2) {
+        if (label1 && label2 && label1.toLowerCase() === label2.toLowerCase()) {
+          console.log(`Matched key label: ${label1}`);
+          matchedObjects.push({
+            objectName: label1,
+            similarityScore: 90
+          });
+          totalScore += 0.9;
+        }
+      }
+    }
+
+    // Compare color profiles (keys often have similar metallic colors)
+    const colorComparison = this.compareDominantColors(
+      image1Data.dominantColors || [],
+      image2Data.dominantColors || []
+    );
+
+    console.log('Color similarity score:', colorComparison.score.toFixed(2) + '%');
+
+    // Add color similarity to total score if significant
+    if (colorComparison.score > 60) {
+      totalScore += (colorComparison.score / 100) * 0.3; // 30% weight for color
+      matchedObjects.push({
+        objectName: 'Similar metallic color profile',
+        similarityScore: colorComparison.score
+      });
+    }
+
+    // Calculate final score
+    const finalScore = Math.min((totalScore / (matchedObjects.length || 1)) * 100, 100);
+
+    console.log('\nKey comparison results:');
+    console.log(`- Number of matched attributes: ${matchedObjects.length}`);
+    console.log(`- Color similarity: ${colorComparison.score.toFixed(2)}%`);
+    console.log(`- Final score: ${finalScore.toFixed(2)}%`);
+
+    return {
+      isMatch: finalScore > 60,
+      score: finalScore,
+      matchedObjects
+    };
+  }
+
+  /**
    * Calculate similarity between two text strings
    * @param text1 First text string
    * @param text2 Second text string
@@ -699,25 +926,36 @@ export class ImageComparisonService {
     }
 
     const matches = [];
-    console.log(`Finding matches for item ${newItem._id} among ${existingItems.length} existing items`);
+    console.log(`\n=== Finding matches for item ${newItem._id} ===`);
+    console.log(`Comparing against ${existingItems.length} existing items`);
+    console.log(`New item image URL: ${newItem.imageUrl}`);
+    console.log(`New item description: ${newItem.description || 'No description'}\n`);
 
     for (const existingItem of existingItems) {
       if (!existingItem.imageUrl || existingItem._id === newItem._id) {
+        console.log(`Skipping item ${existingItem._id}: ${!existingItem.imageUrl ? 'No image URL' : 'Same as new item'}`);
         continue;
       }
 
       try {
-        // Calculate text similarity between descriptions
+        console.log(`\nComparing with item ${existingItem._id}:`);
+        console.log(`Image URL: ${existingItem.imageUrl}`);
+        console.log(`Description: ${existingItem.description || 'No description'}`);
+
+        // Calculate text similarity between descriptions if both exist
         let textSimilarityScore = 0;
         if (newItem.description && existingItem.description) {
-          textSimilarityScore = this.calculateTextSimilarity(
-            newItem.description,
-            existingItem.description
-          );
-          console.log(`Text similarity between descriptions: ${(textSimilarityScore * 100).toFixed(2)}%`);
+          const newDesc = String(newItem.description);
+          const existingDesc = String(existingItem.description);
+          
+          if (newDesc.trim() && existingDesc.trim()) {
+            textSimilarityScore = this.calculateTextSimilarity(newDesc, existingDesc);
+            console.log(`Text similarity between descriptions: ${(textSimilarityScore * 100).toFixed(2)}%`);
+          }
         }
 
         // Compare images
+        console.log('Starting image comparison...');
         const comparisonResult = await this.compareImages(
           newItem.imageUrl,
           existingItem.imageUrl
@@ -727,33 +965,54 @@ export class ImageComparisonService {
         const textBoost = textSimilarityScore * 10; // Up to 10% boost
         const adjustedScore = comparisonResult.score * 0.9 + textBoost;
         
-        console.log(`Item comparison summary for ${existingItem._id}:`);
+        console.log(`\nItem comparison summary for ${existingItem._id}:`);
         console.log(`- Visual match score: ${comparisonResult.score.toFixed(2)}%`);
         console.log(`- Text similarity boost: ${textBoost.toFixed(2)}%`);
         console.log(`- Final adjusted score: ${adjustedScore.toFixed(2)}%`);
 
         if (adjustedScore > 50) {
-          console.log(`Found potential match: Item ${existingItem._id} with score ${adjustedScore.toFixed(2)}%`);
+          console.log(`✓ Found potential match: Item ${existingItem._id} with score ${adjustedScore.toFixed(2)}%`);
           matches.push({
             item: existingItem,
             score: adjustedScore
           });
+        } else {
+          console.log(`✗ Score too low (${adjustedScore.toFixed(2)}%) - not considering as a match`);
         }
       } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        console.error(`Error comparing with item ${existingItem._id}:`, errorMessage);
+        console.error(`\n⚠️ Error comparing with item ${existingItem._id}:`);
+        if (error instanceof Error) {
+          console.error(`- Error message: ${error.message}`);
+        } else {
+          console.error('- Unknown error occurred');
+        }
+        
         if (axios.isAxiosError(error) && error.response) {
-          console.error('API error details:', {
+          console.error('- API error details:', {
             status: error.response.status,
             data: error.response.data
           });
         }
+        
+        // Continue with next item despite error
+        console.log('Continuing with next item comparison...');
+        continue;
       }
     }
 
     // Sort matches by score in descending order
     const sortedMatches = matches.sort((a, b) => b.score - a.score);
+    
+    console.log(`\n=== Match finding complete ===`);
     console.log(`Found ${sortedMatches.length} potential matches`);
+    if (sortedMatches.length > 0) {
+      console.log('Top matches:');
+      sortedMatches.slice(0, 3).forEach((match, index) => {
+        console.log(`${index + 1}. Item ${match.item._id} - Score: ${match.score.toFixed(2)}%`);
+      });
+    }
+    console.log('===========================\n');
+    
     return sortedMatches;
   }
 
@@ -768,7 +1027,7 @@ export class ImageComparisonService {
       'device', 'gadget', 'headphone', 'earphone', 'stereo', 'amplifier',
       'electronic device', 'technology', 'portable speaker', 'audio equipment',
       'loudspeaker', 'boombox', 'subwoofer', 'woofer', 'tweeter', 'soundbar', 
-      'speaker system', 'audio system', 'sound system', 'home audio'
+      'speaker system', 'audio system', 'sound system', 'home audio', 'jbl'
     ];
     
     // Print all raw terms we're searching through to help with debugging
@@ -777,6 +1036,33 @@ export class ImageComparisonService {
     console.log('- Web entities:', data.webEntities);
     console.log('- Best guesses:', data.bestGuessLabels);
     console.log('- Objects:', data.objects.map(obj => obj.name));
+    
+    // Check color information for black JBL-like speakers
+    let hasBlackColor = false;
+    if (data.dominantColors && data.dominantColors.length > 0) {
+      hasBlackColor = data.dominantColors.some(color => {
+        const { red, green, blue } = color.color;
+        // Check if the color is dark (close to black)
+        return red < 50 && green < 50 && blue < 50 && color.pixelFraction > 0.2;
+      });
+      
+      if (hasBlackColor) {
+        console.log('Detected black dominant color - potential JBL speaker');
+      }
+    }
+    
+    // Special case for JBL-like black speakers
+    const hasSpeakerLabel = data.labels.some(label => 
+      label.toLowerCase().includes('speaker') || 
+      label.toLowerCase().includes('loudspeaker')
+    );
+    
+    // If black object + speaker label, add JBL to the detected terms
+    if (hasBlackColor && hasSpeakerLabel) {
+      console.log('Black speaker detected - adding JBL as a potential brand match');
+      // Add a term for JBL speaker that will be included in the results
+      data.webEntities.push('JBL speaker');
+    }
     
     // Create a map to track where each match was found
     const matchSources = new Map<string, string[]>();
@@ -929,6 +1215,33 @@ export class ImageComparisonService {
     confidence: number;
     terms: string[]; 
   } {
+    // Check for special case of JBL speaker (often a black object with speaker labels)
+    const hasSpeakerLabels = data.labels.some(label => 
+      label.toLowerCase().includes('speaker') || 
+      label.toLowerCase().includes('loudspeaker')
+    );
+    
+    // Check for black color (common in JBL speakers)
+    let hasBlackColor = false;
+    if (data.dominantColors && data.dominantColors.length > 0) {
+      hasBlackColor = data.dominantColors.some(color => {
+        const { red, green, blue } = color.color;
+        // Check if the color is dark (close to black)
+        return red < 50 && green < 50 && blue < 50 && color.pixelFraction > 0.2;
+      });
+    }
+    
+    // Short-circuit for JBL-like speakers
+    if (hasSpeakerLabels && hasBlackColor) {
+      console.log('⚠️ Special case: Detected black speaker (likely JBL or similar)');
+      return {
+        category: 'electronics',
+        subcategory: 'audio',
+        confidence: 95,
+        terms: ['speaker', 'loudspeaker', 'audio', 'jbl']
+      };
+    }
+    
     // Define common product categories and their related terms
     const categoryDefinitions = {
       electronics: {
@@ -1082,7 +1395,8 @@ export class ImageComparisonService {
              lowerTerm.includes('audio') || 
              lowerTerm.includes('loudspeaker') ||
              lowerTerm.includes('sound') ||
-             lowerTerm.includes('stereo');
+             lowerTerm.includes('stereo') ||
+             lowerTerm.includes('jbl'); // Add JBL brand recognition
     });
     
     // Log all detected terms for debugging
@@ -1093,15 +1407,40 @@ export class ImageComparisonService {
     console.log('Best guesses:', analysisResult.bestGuessLabels);
     console.log('Speaker-related evidence:', speakerEvidence);
     
+    // Special handling for black objects (often JBL speakers)
+    let hasBlackColor = false;
+    if (analysisResult.dominantColors && analysisResult.dominantColors.length > 0) {
+      hasBlackColor = analysisResult.dominantColors.some(color => {
+        const { red, green, blue } = color.color;
+        // Check if the color is dark (close to black)
+        return red < 50 && green < 50 && blue < 50 && color.pixelFraction > 0.2;
+      });
+      
+      if (hasBlackColor) {
+        console.log('⚠️ Detected predominantly black object - potential JBL speaker');
+      }
+    }
+    
     // Check for wallet misidentification
     const hasWalletObjects = analysisResult.objects.some(obj => 
       obj.name.toLowerCase() === 'wallet' || obj.name.toLowerCase() === 'purse'
     );
     
     // Check if we have strong audio evidence but wallet objects
-    if (hasWalletObjects && speakerEvidence.length >= 2) {
+    // More aggressive correction - require only 1 piece of evidence if it's "Loudspeaker"
+    const hasLoudspeakerLabel = analysisResult.labels.some(label => 
+      label.toLowerCase() === 'loudspeaker' || label.toLowerCase() === 'speaker'
+    );
+    
+    if (hasWalletObjects && (speakerEvidence.length >= 1 || hasLoudspeakerLabel || hasBlackColor)) {
       console.log('\n🔄 CORRECTING MISIDENTIFICATION: Wallet -> Speaker');
-      console.log('Found wallet object but strong speaker evidence in labels/entities');
+      if (hasLoudspeakerLabel) {
+        console.log('Found direct Loudspeaker label evidence');
+      }
+      if (hasBlackColor) {
+        console.log('Black color profile suggests possible JBL speaker');
+      }
+      console.log('Replacing all wallet objects with loudspeaker objects');
       
       // Replace wallet objects with speaker objects
       analysisResult.objects = analysisResult.objects.map(obj => {
@@ -1109,7 +1448,8 @@ export class ImageComparisonService {
           console.log(`Replacing "${obj.name}" with "Loudspeaker" (original confidence: ${obj.score})`);
           return {
             ...obj,
-            name: 'Loudspeaker'
+            name: 'Loudspeaker',
+            score: 0.95 // Force high confidence
           };
         }
         return obj;
