@@ -4,6 +4,7 @@ import axios from "axios";
 import userModel from "../models/user_model";
 import imageComparisonService from "../services/image-comparison.service";
 import { enhanceItemWithAI } from "./image_comparison_controller";
+import { emitNotification } from "../services/socket.service";
 
 // Function to analyze image using Google Cloud Vision API
 const analyzeImage = async (imageUrl: string): Promise<any> => {
@@ -199,6 +200,13 @@ const uploadItem = async (req: Request, res: Response) => {
 
     // Analyze the image using our enhanced AI service
     const visionApiData = await enhanceItemWithAI(req.body.imageUrl);
+    
+    // Get user information to add owner details
+    const user = await userModel.findById(req.body.userId);
+    if (!user) {
+      console.error("User not found:", req.body.userId);
+      return res.status(404).send("User not found");
+    }
 
     // Create new item (with safer property access)
     const newItem: IItem = {
@@ -208,6 +216,9 @@ const uploadItem = async (req: Request, res: Response) => {
       description: req.body.description || "",
       location: req.body.location || "",
       category: req.body.category || "",
+      // Add owner contact information
+      ownerName: user.userName,
+      ownerEmail: user.email,
       visionApiData: visionApiData.visionApiData,
       isResolved: false
     };
@@ -226,7 +237,7 @@ const uploadItem = async (req: Request, res: Response) => {
       potentialMatches = [];
     }
     
-    // If we have high-confidence matches, update the item with the best match
+    // If we have high-confidence matches, update the item and notify
     if (potentialMatches.length > 0 && potentialMatches[0].score > 70) {
       try {
         const bestMatch = potentialMatches[0];
@@ -238,7 +249,23 @@ const uploadItem = async (req: Request, res: Response) => {
         try {
           const matchedItemOwner = await userModel.findOne({ _id: bestMatch.item.userId });
           if (matchedItemOwner) {
-            // In a real implementation, send an email or push notification
+            // Send real-time notification
+            emitNotification(bestMatch.item.userId, {
+              type: 'MATCH_FOUND',
+              title: 'Match Found!',
+              message: `A potential match has been found for your ${bestMatch.item.itemType} item`,
+              data: {
+                matchedItemId: savedItem._id,
+                score: bestMatch.score,
+                matchedItem: {
+                  description: savedItem.description,
+                  imageUrl: savedItem.imageUrl,
+                  itemType: savedItem.itemType,
+                  ownerName: savedItem.ownerName,
+                  ownerEmail: savedItem.ownerEmail
+                }
+              }
+            });
             console.log(`Match found! Notifying user: ${matchedItemOwner.email}`);
           }
         } catch (err) {
@@ -246,7 +273,6 @@ const uploadItem = async (req: Request, res: Response) => {
         }
       } catch (matchError) {
         console.error("Error processing best match:", matchError);
-        // Continue without updating match
       }
     }
 

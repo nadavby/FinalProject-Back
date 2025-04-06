@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import imageComparisonService from '../services/image-comparison.service';
 import itemModel from '../models/item_model';
+import userModel from '../models/user_model';
 import mongoose from 'mongoose';
 
 /**
@@ -31,16 +32,27 @@ export const compareImages = async (req: Request, res: Response) => {
  */
 export const findMatches = async (req: Request, res: Response) => {
   try {
-    const itemId = req.params.id;
+    const itemId = req.params.itemId;
     
     if (!mongoose.Types.ObjectId.isValid(itemId)) {
-      return res.status(400).send('Invalid item ID');
+      return res.status(400).json({ message: 'Invalid item ID format' });
     }
     
+    // Find the item with detailed error handling
     const item = await itemModel.findById(itemId);
     if (!item) {
-      return res.status(404).send('Item not found');
+      return res.status(404).json({ message: 'Item not found' });
     }
+    
+    // Get owner information for the item
+    const owner = await userModel.findOne({ _id: item.userId });
+    if (owner) {
+      item.ownerName = owner.userName;
+      item.ownerEmail = owner.email;
+    }
+    
+    // Log the item finding operation
+    console.log(`Finding matches for item ${itemId} (${item.itemType})`);
     
     // Get opposite type items (lost vs found)
     const oppositeType = item.itemType === 'lost' ? 'found' : 'lost';
@@ -49,18 +61,52 @@ export const findMatches = async (req: Request, res: Response) => {
       isResolved: false 
     });
     
+    console.log(`Found ${potentialMatches.length} potential ${oppositeType} items to compare`);
+    
+    // Populate owner information for all potential matches
+    for (const match of potentialMatches) {
+      const matchOwner = await userModel.findOne({ _id: match.userId });
+      if (matchOwner) {
+        match.ownerName = matchOwner.userName;
+        match.ownerEmail = matchOwner.email;
+      }
+    }
+    
+    // Get matches with scores
     const matches = await imageComparisonService.findMatchesForItem(item, potentialMatches);
+    
+    // Filter to only return matches with a minimum score
+    const significantMatches = matches
+      .filter(match => match.score >= 30)
+      .sort((a, b) => b.score - a.score);
+    
+    console.log(`Found ${significantMatches.length} significant matches for item ${itemId}`);
     
     return res.status(200).json({
       item,
-      matches: matches.map(match => ({
+      matches: significantMatches.map(match => ({
         item: match.item,
-        score: match.score
+        score: match.score,
+        matchDetails: {
+          visualMatchScore: match.score,
+          categoryMatch: match.item.category === item.category,
+          locationSimilarity: match.item.location === item.location ? 'high' : 'low'
+        }
       }))
     });
-  } catch (error) {
-    console.error('Error finding matches:', error);
-    return res.status(500).send('Error finding matches: ' + (error as Error).message);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Error finding matches:', errorMessage);
+    
+    // Detailed error logging
+    if (error instanceof mongoose.Error) {
+      console.error('Mongoose error details:', error);
+    }
+    
+    return res.status(500).json({ 
+      message: 'Server error processing match request',
+      error: errorMessage
+    });
   }
 };
 
