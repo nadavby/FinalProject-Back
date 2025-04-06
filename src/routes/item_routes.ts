@@ -178,6 +178,17 @@ router.post("/upload-item", authMiddleware, upload.single("file"), async (req, r
     req.body.imageUrl = imageUrl;
     req.body.userId = req.body.userId || req.userId; // Use authenticated user ID if not provided
     
+    // Parse location field if it's a JSON string
+    if (req.body.location && typeof req.body.location === 'string') {
+      try {
+        req.body.location = JSON.parse(req.body.location);
+        console.log("Successfully parsed location JSON:", req.body.location);
+      } catch (e) {
+        console.error("Failed to parse location JSON:", e);
+        // Keep it as a string if parsing fails
+      }
+    }
+    
     return uploadItem(req, res);
   } catch (error) {
     console.error("Error in upload-item route:", error);
@@ -272,6 +283,40 @@ router.post("/", authMiddleware, upload.fields([
     req.body.imageUrl = imageUrl;
     req.body.userId = req.body.userId || req.userId; // Use authenticated user ID if not provided
     
+    // Map frontend field names to backend field names
+    if (req.body.name) {
+      req.body.description = req.body.description || req.body.name;
+    }
+    
+    if (req.body.category) {
+      req.body.category = req.body.category;
+    }
+    
+    if (req.body.location) {
+      // Handle location which might be a JSON string or already an object
+      if (typeof req.body.location === 'string') {
+        try {
+          req.body.location = JSON.parse(req.body.location);
+        } catch (e) {
+          console.error("Failed to parse location JSON:", e);
+          // Keep it as is if parsing fails
+        }
+      }
+    }
+    
+    if (req.body.date) {
+      // Store date information if provided
+      console.log("Received date:", req.body.date);
+    }
+    
+    if (req.body.itemType) {
+      // Normalize itemType to lowercase
+      req.body.itemType = req.body.itemType.toLowerCase();
+    } else if (req.body.kind) {
+      // Map 'kind' field to 'itemType' if present
+      req.body.itemType = req.body.kind.toLowerCase();
+    }
+    
     // Store the file in req.file for compatibility with the controller
     req.file = file;
     
@@ -283,6 +328,16 @@ router.post("/", authMiddleware, upload.fields([
     if (req.body.itemType !== 'lost' && req.body.itemType !== 'found') {
       return res.status(400).send("Item type must be 'lost' or 'found'");
     }
+    
+    // Log the processed data before passing to controller
+    console.log("Processed data for controller:", {
+      userId: req.body.userId,
+      imageUrl: req.body.imageUrl,
+      itemType: req.body.itemType,
+      description: req.body.description,
+      location: req.body.location,
+      category: req.body.category
+    });
     
     return uploadItem(req, res);
   } catch (error) {
@@ -370,6 +425,77 @@ router.get("/lost", (req, res) => {
 router.get("/found", (req, res) => {
   req.query.itemType = "found";
   return getAllItems(req, res);
+});
+
+/**
+ * @swagger
+ * /items/user/{userId}:
+ *   get:
+ *     summary: Get items by user ID
+ *     description: Retrieve all items uploaded by a specific user
+ *     tags: [Items]
+ *     parameters:
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: User ID
+ *     responses:
+ *       200:
+ *         description: A list of items uploaded by the user
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/Item'
+ *       404:
+ *         description: User not found
+ *       500:
+ *         description: Server error
+ */
+router.get("/user/:userId", async (req, res) => {
+  try {
+    // Add specific CORS headers for this route
+    res.header('Access-Control-Allow-Origin', req.headers.origin || 'http://localhost:3002');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Referer');
+    
+    console.log('Received request for user items:', {
+      userId: req.params.userId,
+      origin: req.headers.origin,
+      referer: req.headers.referer
+    });
+    
+    const userId = req.params.userId;
+    if (!userId) {
+      return res.status(400).json({ success: false, error: "User ID is required" });
+    }
+
+    // Set the userId as a query parameter for the getAllItems controller
+    req.query.userId = userId;
+    return getAllItems(req, res);
+  } catch (error) {
+    console.error("Error getting user items:", error);
+    return res.status(500).json({ 
+      success: false, 
+      error: "Error fetching user items: " + (error as Error).message 
+    });
+  }
+});
+
+// Add OPTIONS handler for preflight requests to /user/:userId
+router.options("/user/:userId", (req, res) => {
+  // Set CORS headers for preflight requests
+  res.header('Access-Control-Allow-Origin', req.headers.origin || 'http://localhost:3002');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Referer');
+  
+  // Respond with a 200 status for preflight requests
+  res.status(200).end();
 });
 
 /**

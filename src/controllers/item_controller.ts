@@ -174,28 +174,43 @@ const uploadItem = async (req: Request, res: Response) => {
     // Validate required fields
     if (!req.body.userId) {
       console.error("Missing userId in request body");
-      return res.status(400).send("Missing required field: userId");
+      return res.status(400).json({
+        success: false,
+        error: "Missing required field: userId"
+      });
     }
     
     if (!req.body.imageUrl) {
       console.error("Missing imageUrl in request body");
-      return res.status(400).send("Missing required field: imageUrl");
+      return res.status(400).json({
+        success: false,
+        error: "Missing required field: imageUrl"
+      });
     }
     
     // Validate the imageUrl is properly formatted
     if (typeof req.body.imageUrl !== 'string' || !req.body.imageUrl.trim()) {
       console.error("Invalid imageUrl format:", req.body.imageUrl);
-      return res.status(400).send("Invalid imageUrl format");
+      return res.status(400).json({
+        success: false,
+        error: "Invalid imageUrl format"
+      });
     }
     
     if (!req.body.itemType) {
       console.error("Missing itemType in request body");
-      return res.status(400).send("Missing required field: itemType");
+      return res.status(400).json({
+        success: false,
+        error: "Missing required field: itemType"
+      });
     }
 
     if (req.body.itemType !== 'lost' && req.body.itemType !== 'found') {
       console.error("Invalid itemType:", req.body.itemType);
-      return res.status(400).send("Item type must be 'lost' or 'found'");
+      return res.status(400).json({
+        success: false,
+        error: "Item type must be 'lost' or 'found'"
+      });
     }
 
     // Analyze the image using our enhanced AI service
@@ -205,7 +220,22 @@ const uploadItem = async (req: Request, res: Response) => {
     const user = await userModel.findById(req.body.userId);
     if (!user) {
       console.error("User not found:", req.body.userId);
-      return res.status(404).send("User not found");
+      return res.status(404).json({
+        success: false,
+        error: "User not found"
+      });
+    }
+
+    // Parse the location data properly if it's a string
+    let locationData = req.body.location;
+    if (typeof locationData === 'string') {
+      try {
+        locationData = JSON.parse(locationData);
+        console.log("Successfully parsed location JSON:", locationData);
+      } catch (e) {
+        console.error("Failed to parse location JSON:", e);
+        // If parsing fails, keep it as a string
+      }
     }
 
     // Create new item (with safer property access)
@@ -214,7 +244,7 @@ const uploadItem = async (req: Request, res: Response) => {
       imageUrl: req.body.imageUrl,
       itemType: req.body.itemType,
       description: req.body.description || "",
-      location: req.body.location || "",
+      location: locationData || "", // This will be either the parsed object or the original string
       category: req.body.category || "",
       // Add owner contact information
       ownerName: user.userName,
@@ -236,60 +266,61 @@ const uploadItem = async (req: Request, res: Response) => {
       // Continue without matches
       potentialMatches = [];
     }
-    
-    // If we have high-confidence matches, update the item and notify
-    if (potentialMatches.length > 0 && potentialMatches[0].score > 70) {
-      try {
-        const bestMatch = potentialMatches[0];
+
+    // Format for consistent frontend response
+    const response = {
+      success: true,
+      data: formatItemForUI(savedItem),
+      matchResults: potentialMatches.map(match => ({
+        item: formatItemForUI(match.item),
+        score: match.score
+      }))
+    };
+
+    // Send notifications for high-confidence matches
+    try {
+      const highConfidenceMatches = potentialMatches.filter(match => match.score > 70);
+      
+      if (highConfidenceMatches.length > 0) {
+        console.log(`Found ${highConfidenceMatches.length} high-confidence matches, sending notifications`);
         
-        savedItem.matchedItemId = bestMatch.item._id;
-        await savedItem.save();
-        
-        // Notify the owner of the matched item
-        try {
-          const matchedItemOwner = await userModel.findOne({ _id: bestMatch.item.userId });
-          if (matchedItemOwner) {
-            // Send real-time notification
-            emitNotification(bestMatch.item.userId, {
+        for (const match of highConfidenceMatches) {
+          const matchedItem = match.item;
+          const matchOwner = await userModel.findById(matchedItem.userId);
+          
+          if (matchOwner) {
+            // Emit socket notification to the matched item owner
+            emitNotification(matchedItem.userId, {
               type: 'MATCH_FOUND',
-              title: 'Match Found!',
-              message: `A potential match has been found for your ${bestMatch.item.itemType} item`,
-              data: {
-                matchedItemId: savedItem._id,
-                score: bestMatch.score,
-                matchedItem: {
-                  description: savedItem.description,
-                  imageUrl: savedItem.imageUrl,
-                  itemType: savedItem.itemType,
-                  ownerName: savedItem.ownerName,
-                  ownerEmail: savedItem.ownerEmail
-                }
-              }
+              title: 'Potential Match Found!',
+              message: `We found a potential match for your ${matchedItem.itemType} item!`,
+              itemId: matchedItem._id,
+              matchId: savedItem._id,
+              itemName: matchedItem.description,
+              matchName: savedItem.description,
+              itemImage: matchedItem.imageUrl,
+              matchImage: savedItem.imageUrl,
+              score: match.score,
+              ownerName: matchedItem.ownerName,
+              ownerEmail: matchedItem.ownerEmail
             });
-            console.log(`Match found! Notifying user: ${matchedItemOwner.email}`);
+            
+            console.log(`Sent notification to user ${matchedItem.userId} (${matchOwner.email})`);
           }
-        } catch (err) {
-          console.error("Error notifying matched item owner:", err);
         }
-      } catch (matchError) {
-        console.error("Error processing best match:", matchError);
       }
+    } catch (error) {
+      console.error("Error notifying matched item owner:", error);
+      // Continue without sending notifications
     }
 
-    // Return the created item along with potential matches
-    return res.status(201).json({
-      item: formatItemForUI(savedItem),
-      potentialMatches: potentialMatches
-        .filter(match => match.score > 50)
-        .slice(0, 5)
-        .map(match => ({
-          item: formatItemForUI(match.item),
-          score: match.score
-        }))
-    });
+    return res.status(201).json(response);
   } catch (error) {
     console.error("Error uploading item:", error);
-    return res.status(500).send("Error uploading item: " + (error as Error).message);
+    return res.status(500).json({
+      success: false,
+      error: "Error uploading item: " + (error as Error).message
+    });
   }
 };
 

@@ -6,7 +6,10 @@ export interface IItem {
   imageUrl: string;
   itemType: 'lost' | 'found';
   description?: string;
-  location?: string;
+  location?: {
+    lat: number;
+    lng: number;
+  } | string;
   category?: string;
   timestamp?: Date;
   ownerName?: string;
@@ -52,7 +55,7 @@ const itemSchema = new mongoose.Schema<IItem>(
       type: String,
     },
     location: {
-      type: String,
+      type: mongoose.Schema.Types.Mixed,
     },
     category: {
       type: String,
