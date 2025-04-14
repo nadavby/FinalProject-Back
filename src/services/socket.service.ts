@@ -19,17 +19,14 @@ export const initSocket = (server: HttpServer) => {
   });
 
   io.on('connection', (socket) => {
-    console.log('Client connected:', socket.id);
 
     socket.on('authenticate', (data) => {
-      console.log('User authenticated:', data);
       if (data && data.userId) {
-        socket.join(data.userId); // Join a room specific to this user
+        socket.join(data.userId); 
       }
     });
 
     socket.on('disconnect', () => {
-      console.log('Client disconnected:', socket.id);
     });
   });
 
@@ -43,6 +40,7 @@ export const getIO = () => {
   return io;
 };
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const emitNotification = (userId: string, notification: any) => {
   try {
     const io = getIO();
@@ -51,7 +49,6 @@ export const emitNotification = (userId: string, notification: any) => {
       return;
     }
     
-    // Determine which event to emit based on notification type
     const eventName = notification.type === 'MATCH_FOUND' 
       ? 'match_notification' 
       : 'system_notification';
