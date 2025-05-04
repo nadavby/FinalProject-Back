@@ -2,8 +2,8 @@ import request from 'supertest';
 import mongoose from 'mongoose';
 import initApp from '../server';
 import { Express } from 'express';
-import imageComparisonService from '../services/image-comparison.service';
 import { IItem } from '../models/item_model';
+import visionService from '../services/vision-service';
 
 let app: Express;
 let accessToken: string;
@@ -44,8 +44,9 @@ describe('Image Comparison API', () => {
         .send({ imageUrl });
       
       expect(res.status).toBe(200);
-      expect(res.body).toHaveProperty('labels');
-      expect(res.body).toHaveProperty('objects');
+      expect(res.body.data).toHaveProperty('labels');
+      expect(res.body.data).toHaveProperty('objects');
+      expect(res.body.data).toHaveProperty('webEntities');
     });
 
     it('should return 400 if no image URL is provided', async () => {
@@ -69,13 +70,11 @@ describe('Image Comparison API', () => {
         .send({ image1Url, image2Url });
       
       expect(res.status).toBe(200);
-      expect(res.body).toHaveProperty('isMatch');
-      expect(res.body).toHaveProperty('score');
-      expect(res.body).toHaveProperty('matchedObjects');
+      expect(res.body.data.matches[0]).toHaveProperty('score');
+      expect(res.body.data.matches[0]).toHaveProperty('details');
       
       // Same image should have a high score
-      expect(res.body.score).toBeGreaterThan(80);
-      expect(res.body.isMatch).toBe(true);
+      expect(res.body.data.matches[0].score).toBeGreaterThan(80);
     });
 
     it('should return 400 if image URLs are missing', async () => {
@@ -117,11 +116,14 @@ describe('Image Comparison API', () => {
         isResolved: false
       };
       
-      const matches = await imageComparisonService.findMatchesForItem(lostItem, [foundItem]);
+      const result = await visionService.compareImages(lostItem.imageUrl, foundItem.imageUrl);
       
-      expect(matches).toHaveLength(1);
-      expect(matches[0].item).toEqual(foundItem);
-      expect(matches[0].score).toBeGreaterThan(50);
+      expect(result).toHaveProperty('similarityScore');
+      expect(result.similarityScore).toBeGreaterThan(50);
+      expect(result).toHaveProperty('details');
+      expect(result.details).toHaveProperty('labelSimilarity');
+      expect(result.details).toHaveProperty('objectSimilarity');
+      expect(result.details).toHaveProperty('webEntitySimilarity');
     });
   });
 }); 

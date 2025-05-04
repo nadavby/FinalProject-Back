@@ -1,7 +1,7 @@
 /** @format */
 
 import express from "express";
-import { uploadItem, getAllItems, getItemById, resolveItem, updateItem, deleteItem } from "../controllers/item_controller";
+import { uploadItem, getAllItems, getItemById, resolveItem, updateItem, deleteItem, findMatches } from "../controllers/item_controller";
 import { authMiddleware } from "../controllers/auth_controller";
 import multer from "multer";
 
@@ -497,5 +497,48 @@ router.put("/:id", authMiddleware, updateItem);
  *         description: Server error
  */
 router.delete("/:id", authMiddleware, deleteItem);
+
+/**
+ * @swagger
+ * /items/{id}/matches:
+ *   get:
+ *     summary: Find potential matches for an item
+ *     description: Uses AI to find potential matches between lost and found items
+ *     tags: [Items]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID of the item to find matches for
+ *     responses:
+ *       200:
+ *         description: List of potential matches with confidence scores
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 matches:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       item:
+ *                         $ref: '#/components/schemas/Item'
+ *                       score:
+ *                         type: number
+ *                         description: Confidence score (0-100)
+ *       404:
+ *         description: Item not found
+ *       500:
+ *         description: Server error
+ */
+router.get("/:itemId/matches", authMiddleware, findMatches);
 
 export = router; 

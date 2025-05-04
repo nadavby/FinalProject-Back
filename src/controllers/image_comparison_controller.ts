@@ -1,23 +1,48 @@
 import { Request, Response } from 'express';
-import imageComparisonService from '../services/image-comparison.service';
-import itemModel from '../models/item_model';
+import itemModel, { IItem } from '../models/item_model';
 import userModel from '../models/user_model';
 import mongoose from 'mongoose';
+import visionService from '../services/vision-service';
 
+interface MatchResult {
+  item: IItem;
+  score: number;
+}
 
-export const compareImages = async (req: Request, res: Response) => {
+export const compareImages = async (req: Request, res: Response): Promise<Response> => {
   try {
     const { image1Url, image2Url } = req.body;
-    
+
     if (!image1Url || !image2Url) {
-      return res.status(400).send('Both image URLs are required');
+      return res.status(400).json({
+        success: false,
+        error: 'Both image URLs are required'
+      });
     }
-    
-    const result = await imageComparisonService.compareImages(image1Url, image2Url);
-    return res.status(200).json(result);
+
+    const result = await visionService.compareImages(image1Url, image2Url);
+
+    // Filter matches with score >= 30 and sort by score descending
+    const significantMatches = [result]
+      .filter(match => match.similarityScore >= 30)
+      .sort((a, b) => b.similarityScore - a.similarityScore);
+
+    return res.json({
+      success: true,
+      data: {
+        matches: significantMatches.map(match => ({
+          score: match.similarityScore,
+          details: match.details
+        }))
+      }
+    });
+
   } catch (error) {
     console.error('Error comparing images:', error);
-    return res.status(500).send('Error comparing images: ' + (error as Error).message);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to compare images'
+    });
   }
 };
 
@@ -58,17 +83,26 @@ export const findMatches = async (req: Request, res: Response) => {
       }
     }
     
-    const matches = await imageComparisonService.findMatchesForItem(item, potentialMatches);
+    // Compare images using vision service
+    const matches: MatchResult[] = await Promise.all(
+      potentialMatches.map(async (potentialMatch) => {
+        const result = await visionService.compareImages(item.imageUrl, potentialMatch.imageUrl);
+        return {
+          item: potentialMatch,
+          score: result.similarityScore
+        };
+      })
+    );
     
     const significantMatches = matches
-      .filter(match => match.score >= 30)
-      .sort((a, b) => b.score - a.score);
+      .filter((match: MatchResult) => match.score >= 30)
+      .sort((a: MatchResult, b: MatchResult) => b.score - a.score);
     
     console.log(`Found ${significantMatches.length} significant matches for item ${itemId}`);
     
     return res.status(200).json({
       item,
-      matches: significantMatches.map(match => ({
+      matches: significantMatches.map((match: MatchResult) => ({
         item: match.item,
         score: match.score,
         matchDetails: {
@@ -93,32 +127,55 @@ export const findMatches = async (req: Request, res: Response) => {
   }
 };
 
-
-export const analyzeImage = async (req: Request, res: Response) => {
+export const analyzeImage = async (req: Request, res: Response): Promise<Response> => {
   try {
     const { imageUrl } = req.body;
-    
+
     if (!imageUrl) {
-      return res.status(400).send('Image URL is required');
+      return res.status(400).json({
+        success: false,
+        error: 'Image URL is required'
+      });
     }
-    
-    const result = await imageComparisonService.analyzeImage(imageUrl);
-    return res.status(200).json(result);
+
+    const analysis = await visionService.getImageAnalysis(imageUrl);
+
+    return res.json({
+      success: true,
+      data: analysis
+    });
+
   } catch (error) {
     console.error('Error analyzing image:', error);
-    return res.status(500).send('Error analyzing image: ' + (error as Error).message);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to analyze image'
+    });
   }
 };
 
-
 export const enhanceItemWithAI = async (imageUrl: string) => {
   try {
-    const analysisResult = await imageComparisonService.analyzeImage(imageUrl);
+    // Use vision service for analysis
+    const visionAnalysisResult = await visionService.getImageAnalysis(imageUrl);
+    
+    // Transform the results to match the expected format
+    const labels = visionAnalysisResult.labels;
+    const objects = visionAnalysisResult.objects.map(obj => ({
+      name: obj.name,
+      score: obj.score,
+      boundingBox: obj.boundingBox || {
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0
+      }
+    }));
     
     return {
       visionApiData: {
-        labels: analysisResult.labels,
-        objects: analysisResult.objects,
+        labels,
+        objects
       }
     };
   } catch (error) {

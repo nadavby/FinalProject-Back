@@ -1,130 +1,9 @@
 import { Request, Response } from "express";
 import itemModel, { IItem } from "../models/item_model";
-import axios from "axios";
 import userModel from "../models/user_model";
-import imageComparisonService from "../services/image-comparison.service";
 import { enhanceItemWithAI } from "./image_comparison_controller";
 import { emitNotification } from "../services/socket.service";
-
-// Function to analyze image using Google Cloud Vision API
-const analyzeImage = async (imageUrl: string): Promise<any> => {
-  try {
-    if (!process.env.GOOGLE_CLOUD_VISION_API_KEY) {
-      console.log("Google Cloud Vision API key is not set. Skipping image analysis.");
-      return {
-        labels: [],
-        objects: [],
-        colors: []
-      };
-    }
-
-    const apiUrl = `https://vision.googleapis.com/v1/images:annotate?key=${process.env.GOOGLE_CLOUD_VISION_API_KEY}`;
-    
-    const requestData = {
-      requests: [
-        {
-          image: {
-            source: {
-              imageUri: imageUrl
-            }
-          },
-          features: [
-            { type: "LABEL_DETECTION", maxResults: 10 },
-            { type: "OBJECT_LOCALIZATION", maxResults: 10 },
-            { type: "IMAGE_PROPERTIES", maxResults: 10 }
-          ]
-        }
-      ]
-    };
-
-    const response = await axios.post(apiUrl, requestData);
-    
-    // Process the response to extract relevant data
-    const result = response.data.responses[0];
-    
-    return {
-      labels: result.labelAnnotations?.map((label: any) => label.description) || [],
-      objects: result.localizedObjectAnnotations?.map((obj: any) => ({
-        name: obj.name,
-        score: obj.score,
-        boundingBox: {
-          x: obj.boundingPoly?.normalizedVertices[0]?.x,
-          y: obj.boundingPoly?.normalizedVertices[0]?.y,
-          width: obj.boundingPoly?.normalizedVertices[2]?.x - obj.boundingPoly?.normalizedVertices[0]?.x,
-          height: obj.boundingPoly?.normalizedVertices[2]?.y - obj.boundingPoly?.normalizedVertices[0]?.y
-        }
-      })) || [],
-      colors: result.imagePropertiesAnnotation?.dominantColors?.colors?.map((color: any) => ({
-        color: `rgb(${Math.round(color.color.red)}, ${Math.round(color.color.green)}, ${Math.round(color.color.blue)})`,
-        score: color.score
-      })) || [],
-      imageProperties: result.imagePropertiesAnnotation
-    };
-  } catch (error) {
-    console.error("Error analyzing image:", error);
-    return {
-      labels: [],
-      objects: [],
-      colors: []
-    };
-  }
-};
-
-// Function to calculate similarity score between two image analysis results
-const calculateSimilarityScore = (item1: IItem, item2: IItem): number => {
-  if (!item1.visionApiData || !item2.visionApiData) return 0;
-
-  let score = 0;
-  const maxScore = 100;
-
-  // Compare labels (50% of total score)
-  const labels1 = item1.visionApiData.labels || [];
-  const labels2 = item2.visionApiData.labels || [];
-  
-  const commonLabels = labels1.filter(label => labels2.includes(label));
-  const labelScore = (commonLabels.length / Math.max(labels1.length, 1)) * 50;
-  score += labelScore;
-
-  // Compare objects (30% of total score)
-  const objects1 = item1.visionApiData.objects?.map(obj => obj.name.toLowerCase()) || [];
-  const objects2 = item2.visionApiData.objects?.map(obj => obj.name.toLowerCase()) || [];
-  
-  const commonObjects = objects1.filter(obj => objects2.includes(obj));
-  const objectScore = (commonObjects.length / Math.max(objects1.length, 1)) * 30;
-  score += objectScore;
-
-  // Compare colors (20% of total score)
-  const colors1 = item1.visionApiData.colors || [];
-  const colors2 = item2.visionApiData.colors || [];
-  
-  // Simple color comparison based on the top 3 colors
-  const topColors1 = colors1.slice(0, 3).map(c => c.color);
-  const topColors2 = colors2.slice(0, 3).map(c => c.color);
-  
-  const commonColors = topColors1.filter(color => {
-    // Check if a similar color exists in the other set
-    return topColors2.some(color2 => {
-      // Parse the RGB values
-      const rgb1 = color.replace(/^rgb\(|\)$/g, '').split(', ').map(Number);
-      const rgb2 = color2.replace(/^rgb\(|\)$/g, '').split(', ').map(Number);
-      
-      // Calculate the Euclidean distance between the colors
-      const distance = Math.sqrt(
-        Math.pow(rgb1[0] - rgb2[0], 2) +
-        Math.pow(rgb1[1] - rgb2[1], 2) +
-        Math.pow(rgb1[2] - rgb2[2], 2)
-      );
-      
-      // Consider colors similar if their distance is less than a threshold
-      return distance < 100;
-    });
-  });
-  
-  const colorScore = (commonColors.length / Math.max(topColors1.length, 1)) * 20;
-  score += colorScore;
-
-  return Math.min(score, maxScore);
-};
+import matchingService from "../services/matching-service";
 
 // Function to find potential matches for an item
 const findPotentialMatches = async (item: IItem): Promise<Array<{ item: IItem, score: number }>> => {
@@ -136,8 +15,40 @@ const findPotentialMatches = async (item: IItem): Promise<Array<{ item: IItem, s
       isResolved: false 
     });
     
-    // Use the enhanced image comparison service for more accurate matching
-    return await imageComparisonService.findMatchesForItem(item, potentialMatches);
+    // Use the new AI-powered matching service for more accurate matching
+    const matches = await matchingService.findMatches(item, potentialMatches);
+    
+    // Filter out low confidence matches and convert to expected format
+    const significantMatches = matches
+      .filter(match => match.confidenceScore >= 55)
+      .map(match => ({
+        item: match.item,
+        score: match.confidenceScore
+      }));
+
+    // Only notify about high confidence matches (>= 75%)
+    const highConfidenceMatches = significantMatches.filter(match => match.score >= 75);
+    if (highConfidenceMatches.length > 0) {
+      // Get owner information for notifications
+      const itemOwner = await userModel.findById(item.userId);
+      
+      // Only send one notification per user for all matches
+      if (itemOwner) {
+        const notification = {
+          type: 'MATCH_FOUND',
+          title: 'New Potential Matches Found',
+          message: `We found ${highConfidenceMatches.length} potential match${highConfidenceMatches.length > 1 ? 'es' : ''} for your ${item.itemType} item.`,
+          data: {
+            matchedItemId: item._id,
+            matchCount: highConfidenceMatches.length,
+            topScore: Math.max(...highConfidenceMatches.map(m => m.score))
+          }
+        };
+        emitNotification(itemOwner._id.toString(), notification);
+      }
+    }
+
+    return significantMatches;
   } catch (error) {
     console.error("Error finding potential matches:", error);
     return [];
@@ -162,14 +73,7 @@ const formatItemForUI = (item: IItem) => {
 const uploadItem = async (req: Request, res: Response) => {
   try {
     // Detailed request logging
-    console.log("Uploading item with body:", JSON.stringify(req.body, null, 2));
-    console.log("File info:", req.file ? JSON.stringify({
-      fieldname: req.file.fieldname,
-      originalname: req.file.originalname,
-      mimetype: req.file.mimetype,
-      size: req.file.size,
-      path: req.file.path
-    }, null, 2) : "No file provided");
+    console.log("Uploading New Item");
     
     // Validate required fields
     if (!req.body.userId) {
@@ -253,7 +157,6 @@ const uploadItem = async (req: Request, res: Response) => {
       isResolved: false
     };
 
-    console.log("Creating new item:", JSON.stringify(newItem, null, 2));
     const savedItem = await itemModel.create(newItem);
     console.log("Item saved successfully with ID:", savedItem._id);
 
@@ -330,7 +233,7 @@ const getAllItems = async (req: Request, res: Response) => {
     const itemType = req.query.itemType as string;
     const userId = req.query.userId as string;
     
-    let query: any = {};
+    const query: Record<string, unknown> = {};
     
     if (itemType && (itemType === 'lost' || itemType === 'found')) {
       query.itemType = itemType;
@@ -444,10 +347,56 @@ const deleteItem = async (req: Request, res: Response) => {
     }
     
     await itemModel.findByIdAndDelete(req.params.id);
-    res.status(200).send("Item deleted successfully");
+    res.status(200).json({ message: "Item deleted successfully" });
   } catch (error) {
     console.error("Error deleting item:", error);
     res.status(500).send("Error deleting item: " + (error as Error).message);
+  }
+};
+
+// Add a dedicated endpoint for finding matches
+const findMatches = async (req: Request, res: Response) => {
+  try {
+    const { itemId } = req.params;
+    
+    // Validate item ID
+    if (!itemId) {
+      return res.status(400).json({
+        success: false,
+        error: "Item ID is required"
+      });
+    }
+    
+    // Get the item
+    const item = await itemModel.findById(itemId);
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        error: "Item not found"
+      });
+    }
+    
+    // Find potential matches
+    const matches = await findPotentialMatches(item);
+    
+    // Return only high confidence matches (score > 70)
+    const highConfidenceMatches = matches
+      .filter(match => match.score > 70)
+      .map(match => ({
+        ...match,
+        item: formatItemForUI(match.item)
+      }));
+    
+    return res.status(200).json({
+      success: true,
+      matches: highConfidenceMatches
+    });
+  } catch (error) {
+    console.error("Error finding matches:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Server error while finding matches"
+    });
   }
 };
 
@@ -457,5 +406,6 @@ export {
   getItemById,
   resolveItem,
   updateItem,
-  deleteItem
+  deleteItem,
+  findMatches
 }; 
