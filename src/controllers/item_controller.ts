@@ -7,38 +7,29 @@ import { enhanceItemWithAI } from "./image_comparison_controller";
 import { emitNotification } from "../services/socket.service";
 import matchingService from "../services/matching-service";
 
-// Function to find potential matches for an item
 const findPotentialMatches = async (
   item: IItem
 ): Promise<Array<{ item: IItem; score: number }>> => {
   try {
-    // Find items of the opposite type (lost/found)
     const oppositeType = item.itemType === "lost" ? "found" : "lost";
     const potentialMatches = await itemModel.find({
       itemType: oppositeType,
       isResolved: false,
     });
 
-    // Use the new AI-powered matching service for more accurate matching
     const matches = await matchingService.findMatches(item, potentialMatches);
-
-    // Filter out low confidence matches and convert to expected format
     const significantMatches = matches
       .filter((match) => match.confidenceScore >= 55)
       .map((match) => ({
         item: match.item,
         score: match.confidenceScore,
       }));
-
-    // Only notify about high confidence matches (>= 75%)
     const highConfidenceMatches = significantMatches.filter(
       (match) => match.score >= 75
     );
     if (highConfidenceMatches.length > 0) {
-      // Get owner information for notifications
       const itemOwner = await userModel.findById(item.userId);
 
-      // Only send one notification per user for all matches
       if (itemOwner) {
         const notification = {
           type: "MATCH_FOUND",
@@ -61,12 +52,9 @@ const findPotentialMatches = async (
   }
 };
 
-// Helper function to format items for the frontend
 const formatItemForUI = (item: IItem) => {
-  // Create a properly typed version with all properties from the original item
   const formattedItem = {
     ...item,
-    // Add UI-friendly field names while keeping the original properties
     name: item.description || "",
     imgURL: item.imageUrl || "",
     id: item._id,
@@ -75,13 +63,10 @@ const formatItemForUI = (item: IItem) => {
   return formattedItem;
 };
 
-// Controller function to upload a new lost or found item
 const uploadItem = async (req: Request, res: Response) => {
   try {
-    // Detailed request logging
     console.log("Uploading New Item");
 
-    // Validate required fields
     if (!req.body.userId) {
       console.error("Missing userId in request body");
       return res.status(400).json({
@@ -98,7 +83,6 @@ const uploadItem = async (req: Request, res: Response) => {
       });
     }
 
-    // Validate the imageUrl is properly formatted
     if (typeof req.body.imageUrl !== "string" || !req.body.imageUrl.trim()) {
       console.error("Invalid imageUrl format:", req.body.imageUrl);
       return res.status(400).json({
@@ -123,10 +107,8 @@ const uploadItem = async (req: Request, res: Response) => {
       });
     }
 
-    // Analyze the image using our enhanced AI service
     const visionApiData = await enhanceItemWithAI(req.body.imageUrl);
 
-    // Get user information to add owner details
     const user = await userModel.findById(req.body.userId);
     if (!user) {
       console.error("User not found:", req.body.userId);
@@ -136,7 +118,6 @@ const uploadItem = async (req: Request, res: Response) => {
       });
     }
 
-    // Parse the location data properly if it's a string
     let locationData = req.body.location;
     if (typeof locationData === "string") {
       try {
@@ -144,19 +125,16 @@ const uploadItem = async (req: Request, res: Response) => {
         console.log("Successfully parsed location JSON:", locationData);
       } catch (e) {
         console.error("Failed to parse location JSON:", e);
-        // If parsing fails, keep it as a string
       }
     }
 
-    // Create new item (with safer property access)
     const newItem: IItem = {
       userId: req.body.userId,
       imageUrl: req.body.imageUrl,
       itemType: req.body.itemType,
       description: req.body.description || "",
-      location: locationData || "", // This will be either the parsed object or the original string
+      location: locationData || "", 
       category: req.body.category || "",
-      // Add owner contact information
       ownerName: user.userName,
       ownerEmail: user.email,
       visionApiData: visionApiData.visionApiData,
@@ -166,17 +144,14 @@ const uploadItem = async (req: Request, res: Response) => {
     const savedItem = await itemModel.create(newItem);
     console.log("Item saved successfully with ID:", savedItem._id);
 
-    // Find potential matches using our enhanced comparison
     let potentialMatches: Array<{ item: IItem; score: number }> = [];
     try {
       potentialMatches = await findPotentialMatches(savedItem);
     } catch (error) {
       console.error("Error finding potential matches:", error);
-      // Continue without matches
       potentialMatches = [];
     }
 
-    // Format for consistent frontend response
     const response = {
       success: true,
       data: formatItemForUI(savedItem),
@@ -186,7 +161,6 @@ const uploadItem = async (req: Request, res: Response) => {
       })),
     };
 
-    // Send notifications for high-confidence matches
     try {
       const highConfidenceMatches = potentialMatches.filter(
         (match) => match.score > 70
@@ -202,7 +176,6 @@ const uploadItem = async (req: Request, res: Response) => {
           const matchOwner = await userModel.findById(matchedItem.userId);
 
           if (matchOwner) {
-            // Emit socket notification to the matched item owner
             emitNotification(matchedItem.userId, {
               type: "MATCH_FOUND",
               title: "Potential Match Found!",
@@ -226,7 +199,6 @@ const uploadItem = async (req: Request, res: Response) => {
       }
     } catch (error) {
       console.error("Error notifying matched item owner:", error);
-      // Continue without sending notifications
     }
 
     return res.status(201).json(response);
@@ -239,7 +211,6 @@ const uploadItem = async (req: Request, res: Response) => {
   }
 };
 
-// Controller function to get all items
 const getAllItems = async (req: Request, res: Response) => {
   try {
     const itemType = req.query.itemType as string;
@@ -257,7 +228,6 @@ const getAllItems = async (req: Request, res: Response) => {
 
     const items = await itemModel.find(query);
 
-    // Format items for the frontend
     const formattedItems = items.map(formatItemForUI);
 
     return res.status(200).json(formattedItems);
@@ -269,7 +239,6 @@ const getAllItems = async (req: Request, res: Response) => {
   }
 };
 
-// Controller function to get a specific item by ID
 const getItemById = async (req: Request, res: Response) => {
   try {
     const itemId = req.params.id;
@@ -279,7 +248,6 @@ const getItemById = async (req: Request, res: Response) => {
       return res.status(404).send("Item not found");
     }
 
-    // Format item for the frontend
     const formattedItem = formatItemForUI(item);
 
     return res.status(200).json(formattedItem);
@@ -291,7 +259,6 @@ const getItemById = async (req: Request, res: Response) => {
   }
 };
 
-// Controller function to mark an item as resolved
 const resolveItem = async (req: Request, res: Response) => {
   try {
     const item = await itemModel.findById(req.params.id);
@@ -299,7 +266,6 @@ const resolveItem = async (req: Request, res: Response) => {
       return res.status(404).send("Item not found");
     }
 
-    // Check if the user is the owner of the item
     if (item.userId !== req.body.userId) {
       return res.status(403).send("Not authorized to resolve this item");
     }
@@ -307,7 +273,6 @@ const resolveItem = async (req: Request, res: Response) => {
     item.isResolved = true;
     await item.save();
 
-    // If this item has a matched item, mark it as resolved too
     if (item.matchedItemId) {
       const matchedItem = await itemModel.findById(item.matchedItemId);
       if (matchedItem) {
@@ -323,7 +288,6 @@ const resolveItem = async (req: Request, res: Response) => {
   }
 };
 
-// Controller function to update an item
 const updateItem = async (req: Request, res: Response) => {
   try {
     const item = await itemModel.findById(req.params.id);
@@ -331,12 +295,10 @@ const updateItem = async (req: Request, res: Response) => {
       return res.status(404).send("Item not found");
     }
 
-    // Check if the user is the owner of the item
     if (item.userId !== req.body.userId) {
       return res.status(403).send("Not authorized to update this item");
     }
 
-    // Update allowed fields
     if (req.body.description) item.description = req.body.description;
     if (req.body.location) item.location = req.body.location;
     if (req.body.category) item.category = req.body.category;
@@ -349,7 +311,6 @@ const updateItem = async (req: Request, res: Response) => {
   }
 };
 
-// Controller function to delete an item
 const deleteItem = async (req: Request, res: Response) => {
   try {
     const item = await itemModel.findById(req.params.id);
@@ -357,7 +318,6 @@ const deleteItem = async (req: Request, res: Response) => {
       return res.status(404).send("Item not found");
     }
 
-    // Check if the user is the owner of the item
     if (item.userId !== req.body.userId) {
       return res.status(403).send("Not authorized to delete this item");
     }
@@ -370,12 +330,10 @@ const deleteItem = async (req: Request, res: Response) => {
   }
 };
 
-// Add a dedicated endpoint for finding matches
 const findMatches = async (req: Request, res: Response) => {
   try {
     const { itemId } = req.params;
 
-    // Validate item ID
     if (!itemId) {
       return res.status(400).json({
         success: false,
@@ -383,7 +341,6 @@ const findMatches = async (req: Request, res: Response) => {
       });
     }
 
-    // Get the item
     const item = await itemModel.findById(itemId);
     if (!item) {
       return res.status(404).json({
@@ -392,10 +349,8 @@ const findMatches = async (req: Request, res: Response) => {
       });
     }
 
-    // Find potential matches
     const matches = await findPotentialMatches(item);
 
-    // Return only high confidence matches (score > 70)
     const highConfidenceMatches = matches
       .filter((match) => match.score > 70)
       .map((match) => ({
