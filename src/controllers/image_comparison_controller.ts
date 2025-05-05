@@ -22,7 +22,6 @@ export const compareImages = async (req: Request, res: Response): Promise<Respon
 
     const result = await visionService.compareImages(image1Url, image2Url);
 
-    // Filter matches with score >= 30 and sort by score descending
     const significantMatches = [result]
       .filter(match => match.similarityScore >= 30)
       .sort((a, b) => b.similarityScore - a.similarityScore);
@@ -83,7 +82,6 @@ export const findMatches = async (req: Request, res: Response) => {
       }
     }
     
-    // Compare images using vision service
     const matches: MatchResult[] = await Promise.all(
       potentialMatches.map(async (potentialMatch) => {
         const result = await visionService.compareImages(item.imageUrl, potentialMatch.imageUrl);
@@ -156,10 +154,7 @@ export const analyzeImage = async (req: Request, res: Response): Promise<Respons
 
 export const enhanceItemWithAI = async (imageUrl: string) => {
   try {
-    // Use vision service for analysis
     const visionAnalysisResult = await visionService.getImageAnalysis(imageUrl);
-    
-    // Transform the results to match the expected format
     const labels = visionAnalysisResult.labels;
     const objects = visionAnalysisResult.objects.map(obj => ({
       name: obj.name,

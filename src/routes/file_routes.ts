@@ -33,7 +33,7 @@ const storage = multer.diskStorage({
   filename: function (req, file, cb) {
     const ext = file.originalname
       .split(".")
-      .filter(Boolean) // removes empty extensions (e.g. `filename...txt`)
+      .filter(Boolean) 
       .slice(1)
       .join(".");
     cb(null, Date.now() + "." + ext);

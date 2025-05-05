@@ -69,7 +69,7 @@ class VisionService {
     }
 
     this.analysisCache = {};
-    this.cacheExpirationMs = 1000 * 60 * 60 * 24; // 24 hours
+    this.cacheExpirationMs = 1000 * 60 * 60 * 24;
   }
 
   private normalizeUrl(url: string): string {
@@ -84,15 +84,11 @@ class VisionService {
     }
   }
 
-  /**
-   * Compare two images using Google Cloud Vision API and return similarity score
-   */
   async compareImages(
     image1Url: string,
     image2Url: string
   ): Promise<{ similarityScore: number; details?: VisionComparisonDetails }> {
     try {
-      // Analyze both images to get their labels and features
       const [image1Data, image2Data] = await Promise.all([
         this.analyzeImage(image1Url),
         this.analyzeImage(image2Url)
@@ -102,7 +98,6 @@ class VisionService {
         return { similarityScore: 0 };
       }
 
-      // Calculate similarity based on labels and objects
       const labelSimilarity = this.calculateLabelSimilarity(
         image1Data.labels || [],
         image2Data.labels || []
@@ -113,7 +108,6 @@ class VisionService {
         image2Data.objects || []
       );
 
-      // Weighted similarity score (50% labels, 50% objects)
       const weightedScore = (
         labelSimilarity * 0.5 +
         objectSimilarity * 0.5
@@ -132,9 +126,6 @@ class VisionService {
     }
   }
 
-  /**
-   * Get analysis data for a single image
-   */
   public async getImageAnalysis(imageUrl: string): Promise<{
     labels: string[];
     objects: VisionObject[];
@@ -156,13 +147,8 @@ class VisionService {
     }
   }
 
-  /**
-   * Analyze image using Google Cloud Vision API to extract features
-   */
   private async analyzeImage(imageUrl: string): Promise<ImageAnalysisResult | null> {
     const normalizedUrl = this.normalizeUrl(imageUrl);
-    
-    // Check cache first
     const cachedResult = this.analysisCache[normalizedUrl];
     const now = Date.now();
     
@@ -178,7 +164,6 @@ class VisionService {
     try {
       let imageContent: string;
 
-      // Handle local files for development
       if (normalizedUrl.startsWith('http://localhost')) {
         const publicIndex = normalizedUrl.indexOf('/public/');
         if (publicIndex !== -1) {
@@ -199,12 +184,10 @@ class VisionService {
           throw new Error('Invalid local file path');
         }
       } else {
-        // Download image from URL
         const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
         imageContent = Buffer.from(response.data, 'base64').toString('base64');
       }
 
-      // Format request for Vision API
       const requestBody = {
         requests: [{
           image: {
@@ -213,26 +196,26 @@ class VisionService {
           features: [
             { 
               type: 'LABEL_DETECTION',
-              maxResults: 20,  // Increased from 15
+              maxResults: 20, 
               model: 'builtin/latest'
             },
             { 
               type: 'OBJECT_LOCALIZATION',
-              maxResults: 20,  // Increased from 15
+              maxResults: 20, 
               model: 'builtin/latest'
             },
             {
-              type: 'IMAGE_PROPERTIES',  // Added to get color information
+              type: 'IMAGE_PROPERTIES', 
               maxResults: 20
             },
             {
-              type: 'CROP_HINTS'  // Added to get object positioning
+              type: 'CROP_HINTS' 
             }
           ],
           imageContext: {
-            languageHints: ['en'],  // Ensure English labels
+            languageHints: ['en'],  
             cropHintsParams: {
-              aspectRatios: [1.0]  // Square crop for consistent object detection
+              aspectRatios: [1.0] 
             }
           }
         }]
@@ -248,7 +231,7 @@ class VisionService {
           headers: {
             'Content-Type': 'application/json'
           },
-          timeout: 15000  // Increased timeout for more detailed analysis
+          timeout: 15000  
         }
       );
 
@@ -258,7 +241,6 @@ class VisionService {
 
       const result = response.data.responses[0];
 
-      // Extract relevant data with enhanced information
       const analysisResult: ExtendedImageAnalysisResult = {
         labels: (result.labelAnnotations || []).map((label: { description: string; score: number; topicality?: number }) => ({
           description: label.description,
@@ -282,7 +264,6 @@ class VisionService {
         }))
       };
 
-      // Add dominant colors if available
       if (result.imagePropertiesAnnotation?.dominantColors?.colors) {
         const dominantColors = result.imagePropertiesAnnotation.dominantColors.colors
           .sort((a: VisionColor, b: VisionColor) => b.score - a.score)
@@ -296,7 +277,6 @@ class VisionService {
         analysisResult.dominantColors = dominantColors;
       }
 
-      // Add positioning information if available
       if (result.cropHintsAnnotation?.cropHints?.[0]) {
         analysisResult.positioning = {
           confidence: result.cropHintsAnnotation.cropHints[0].confidence,
@@ -304,7 +284,6 @@ class VisionService {
         };
       }
 
-      // Cache the result
       this.analysisCache[normalizedUrl] = {
         timestamp: now,
         data: analysisResult
@@ -317,9 +296,7 @@ class VisionService {
     }
   }
 
-  /**
-   * Handle Vision API errors
-   */
+
   private handleVisionApiError(error: unknown): void {
     console.error('=== Vision API Error Details ===');
     if (axios.isAxiosError(error)) {
@@ -347,9 +324,6 @@ class VisionService {
     }
   }
 
-  /**
-   * Calculate similarity between two sets of labels
-   */
   private calculateLabelSimilarity(labels1: VisionLabel[], labels2: VisionLabel[]): number {
     if (!labels1.length || !labels2.length) return 0;
 
@@ -366,9 +340,6 @@ class VisionService {
     return matchCount / Math.min(labels1.length, labels2.length);
   }
 
-  /**
-   * Calculate similarity between two sets of objects
-   */
   private calculateObjectSimilarity(objects1: VisionObject[], objects2: VisionObject[]): number {
     if (!objects1.length || !objects2.length) return 0;
 
@@ -386,7 +357,6 @@ class VisionService {
   }
 }
 
-// Create singleton instance
 const visionService = new VisionService();
 
 export default visionService; 
