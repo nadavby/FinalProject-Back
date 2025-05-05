@@ -1,7 +1,15 @@
 /** @format */
 
 import express from "express";
-import { uploadItem, getAllItems, getItemById, resolveItem, updateItem, deleteItem, findMatches } from "../controllers/item_controller";
+import {
+  uploadItem,
+  getAllItems,
+  getItemById,
+  resolveItem,
+  updateItem,
+  deleteItem,
+  findMatches,
+} from "../controllers/item_controller";
 import { authMiddleware } from "../controllers/auth_controller";
 import multer from "multer";
 
@@ -78,21 +86,17 @@ const storage = multer.diskStorage({
     cb(null, "public/items");
   },
   filename: function (req, file, cb) {
-    const ext = file.originalname
-      .split(".")
-      .filter(Boolean)
-      .slice(1)
-      .join(".");
+    const ext = file.originalname.split(".").filter(Boolean).slice(1).join(".");
     cb(null, Date.now() + "." + ext);
   },
 });
 
-const upload = multer({ 
+const upload = multer({
   storage: storage,
-  fileFilter: function(req, file, cb) {
+  fileFilter: function (req, file, cb) {
     console.log("Received file with field name:", file.fieldname);
     cb(null, true);
-  }
+  },
 });
 
 /**
@@ -158,60 +162,69 @@ const upload = multer({
  *       500:
  *         description: Server error
  */
-router.post("/", authMiddleware, upload.fields([
-  { name: 'file', maxCount: 1 },
-  { name: 'image', maxCount: 1 }
-]), async (req, res) => {
-  try {
-    
-    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-    const file = files?.file?.[0] || files?.image?.[0];
-    
-    if (!file) {
-      return res.status(400).send("Missing required file. Please upload an image with field name 'file' or 'image'.");
-    }
-    
-    
-    const imageUrl = base + file.path;
-    req.body.imageUrl = imageUrl;
-    req.body.userId = req.body.userId || req.userId; 
-    
-    if (req.body.name) {
-      req.body.description = req.body.description || req.body.name;
-    }
-    
-    if (req.body.location) {
-      if (typeof req.body.location === 'string') {
-        try {
-          req.body.location = JSON.parse(req.body.location);
-        } catch (e) {
-          console.error("Failed to parse location JSON:", e);
+router.post(
+  "/",
+  authMiddleware,
+  upload.fields([
+    { name: "file", maxCount: 1 },
+    { name: "image", maxCount: 1 },
+  ]),
+  async (req, res) => {
+    try {
+      const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+      const file = files?.file?.[0] || files?.image?.[0];
+
+      if (!file) {
+        return res
+          .status(400)
+          .send(
+            "Missing required file. Please upload an image with field name 'file' or 'image'."
+          );
+      }
+
+      const imageUrl = base + file.path;
+      req.body.imageUrl = imageUrl;
+      req.body.userId = req.body.userId || req.params.userId;
+
+      if (req.body.name) {
+        req.body.description = req.body.description || req.body.name;
+      }
+
+      if (req.body.location) {
+        if (typeof req.body.location === "string") {
+          try {
+            req.body.location = JSON.parse(req.body.location);
+          } catch (e) {
+            console.error("Failed to parse location JSON:", e);
+          }
         }
       }
+
+      if (req.body.itemType) {
+        req.body.itemType = req.body.itemType.toLowerCase();
+      } else if (req.body.kind) {
+        req.body.itemType = req.body.kind.toLowerCase();
+      }
+
+      req.file = file;
+
+      if (!req.body.itemType) {
+        return res.status(400).send("Missing required field: itemType");
+      }
+
+      if (req.body.itemType !== "lost" && req.body.itemType !== "found") {
+        return res.status(400).send("Item type must be 'lost' or 'found'");
+      }
+
+      return uploadItem(req, res);
+    } catch (error) {
+      console.error("Error in /items POST route:", error);
+      return res
+        .status(500)
+        .send("Error uploading item: " + (error as Error).message);
     }
-    
-    if (req.body.itemType) {
-      req.body.itemType = req.body.itemType.toLowerCase();
-    } else if (req.body.kind) {
-      req.body.itemType = req.body.kind.toLowerCase();
-    }
-    
-    req.file = file;
-    
-    if (!req.body.itemType) {
-      return res.status(400).send("Missing required field: itemType");
-    }
-    
-    if (req.body.itemType !== 'lost' && req.body.itemType !== 'found') {
-      return res.status(400).send("Item type must be 'lost' or 'found'");
-    }
-    
-    return uploadItem(req, res);
-  } catch (error) {
-    console.error("Error in /items POST route:", error);
-    return res.status(500).send("Error uploading item: " + (error as Error).message);
   }
-});
+);
 
 /**
  * @swagger
@@ -324,33 +337,47 @@ router.get("/found", (req, res) => {
  */
 router.get("/user/:userId", async (req, res) => {
   try {
-    res.header('Access-Control-Allow-Origin', req.headers.origin || 'http://localhost:3002');
-    res.header('Access-Control-Allow-Credentials', 'true');
-    res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Referer');
-    
+    res.header(
+      "Access-Control-Allow-Origin",
+      req.headers.origin || "http://localhost:3002"
+    );
+    res.header("Access-Control-Allow-Credentials", "true");
+    res.header("Access-Control-Allow-Methods", "GET, OPTIONS");
+    res.header(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization, Accept, Referer"
+    );
+
     const userId = req.params.userId;
     if (!userId) {
-      return res.status(400).json({ success: false, error: "User ID is required" });
+      return res
+        .status(400)
+        .json({ success: false, error: "User ID is required" });
     }
 
     req.query.userId = userId;
     return getAllItems(req, res);
   } catch (error) {
     console.error("Error getting user items:", error);
-    return res.status(500).json({ 
-      success: false, 
-      error: "Error fetching user items: " + (error as Error).message 
+    return res.status(500).json({
+      success: false,
+      error: "Error fetching user items: " + (error as Error).message,
     });
   }
 });
 
 router.options("/user/:userId", (req, res) => {
-  res.header('Access-Control-Allow-Origin', req.headers.origin || 'http://localhost:3002');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Referer');
-  
+  res.header(
+    "Access-Control-Allow-Origin",
+    req.headers.origin || "http://localhost:3002"
+  );
+  res.header("Access-Control-Allow-Credentials", "true");
+  res.header("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.header(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, Accept, Referer"
+  );
+
   res.status(200).end();
 });
 
@@ -541,4 +568,4 @@ router.delete("/:id", authMiddleware, deleteItem);
  */
 router.get("/:itemId/matches", authMiddleware, findMatches);
 
-export = router; 
+export = router;

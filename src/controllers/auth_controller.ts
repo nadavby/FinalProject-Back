@@ -1,5 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-/** @format */
+
+
+
+
+
+
 
 import { NextFunction, Request, Response } from "express";
 import userModel from "../models/user_model";
@@ -7,15 +12,6 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import { OAuth2Client } from "google-auth-library";
-
-// Extend the Express Request interface
-declare global {
-  namespace Express {
-    interface Request {
-      userId?: string;
-    }
-  }
-}
 
 type Payload = {
   _id: string;
@@ -44,24 +40,23 @@ const googleSignIn = async (req: Request, res: Response) => {
         imgURL: picture,
         userName: email,
       });
-      
     }
     const tokens = generateToken(user._id);
-      if (!tokens) {
-        return res.status(500).send("server error");
-      }
-      if (user.refreshToken == null) {
-        user.refreshToken = [];
-      }
-      user.refreshToken.push(tokens.refreshToken);
-      await user.save();
-      return res.status(200).send({
-        email: user.email,
-        _id: user._id,
-        imgUrl: user.imgURL,
-        userName: user.userName,
-        ...tokens,
-      });
+    if (!tokens) {
+      return res.status(500).send("server error");
+    }
+    if (user.refreshToken == null) {
+      user.refreshToken = [];
+    }
+    user.refreshToken.push(tokens.refreshToken);
+    await user.save();
+    return res.status(200).send({
+      email: user.email,
+      _id: user._id,
+      imgUrl: user.imgURL,
+      userName: user.userName,
+      ...tokens,
+    });
   } catch (err) {
     return res.status(400).send((err as Error).message);
   }
@@ -97,9 +92,12 @@ const generateToken = (
   if (!process.env.TOKEN_SECRET || !process.env.TOKEN_EXPIRATION) {
     return null;
   }
-  
-  console.log("Generating new token with expiration:", process.env.TOKEN_EXPIRATION);
-  
+
+  console.log(
+    "Generating new token with expiration:",
+    process.env.TOKEN_EXPIRATION
+  );
+
   const random = Math.floor(Math.random() * 1000000);
   const accessToken = jwt.sign(
     { _id: _id, random: random },
@@ -253,91 +251,117 @@ export const authMiddleware = (
     res.status(401).send("Unauthorized - Missing authorization header");
     return;
   }
-  
+
   const parts = authorization.split(" ");
   if (parts.length !== 2) {
     console.error("Auth error: Invalid authorization format", authorization);
-    res.status(401).send("Unauthorized - Invalid authorization format. Expected 'Bearer [token]' or 'JWT [token]'");
+    res
+      .status(401)
+      .send(
+        "Unauthorized - Invalid authorization format. Expected 'Bearer [token]' or 'JWT [token]'"
+      );
     return;
   }
-  
+
   const prefix = parts[0];
   const token = parts[1];
-  
+
   // Accept both 'Bearer' and 'JWT' prefixes
-  if (prefix !== 'Bearer' && prefix !== 'JWT') {
-    console.error(`Auth error: Invalid token prefix "${prefix}"`, authorization);
-    res.status(401).send("Unauthorized - Invalid token prefix. Expected 'Bearer' or 'JWT'");
+  if (prefix !== "Bearer" && prefix !== "JWT") {
+    console.error(
+      `Auth error: Invalid token prefix "${prefix}"`,
+      authorization
+    );
+    res
+      .status(401)
+      .send("Unauthorized - Invalid token prefix. Expected 'Bearer' or 'JWT'");
     return;
   }
-  
+
   if (!token) {
     console.error("Auth error: Empty token");
     res.status(401).send("Unauthorized - Empty token");
     return;
   }
-  
+
   if (!process.env.TOKEN_SECRET) {
     console.error("Auth error: TOKEN_SECRET not set in environment");
     res.status(500).send("Server configuration error - TOKEN_SECRET not set");
     return;
   }
-  
+
   // Get the refresh token from the request, if present
   const refreshToken = req.header("refresh-token");
-  
+
   // Verify the JWT token
   jwt.verify(token, process.env.TOKEN_SECRET, async (err, payload) => {
     // If token expired and we have a refresh token, try to refresh
     if (err && err.name === "TokenExpiredError" && refreshToken) {
-      console.log("Token expired, attempting refresh with provided refresh token");
+      console.log(
+        "Token expired, attempting refresh with provided refresh token"
+      );
       try {
         // Verify the refresh token
-        const refreshPayload = jwt.verify(refreshToken, process.env.TOKEN_SECRET!);
-        if (!refreshPayload || typeof refreshPayload !== 'object' || !('_id' in refreshPayload)) {
+        const refreshPayload = jwt.verify(
+          refreshToken,
+          process.env.TOKEN_SECRET!
+        );
+        if (
+          !refreshPayload ||
+          typeof refreshPayload !== "object" ||
+          !("_id" in refreshPayload)
+        ) {
           console.error("Invalid refresh token payload structure");
           return res.status(401).send("Unauthorized - Invalid refresh token");
         }
-        
+
         // Find the user
-        const user = await userModel.findOne({ _id: (refreshPayload as Payload)._id });
+        const user = await userModel.findOne({
+          _id: (refreshPayload as Payload)._id,
+        });
         if (!user) {
           console.error("User not found for refresh token");
           return res.status(401).send("Unauthorized - Invalid refresh token");
         }
-        
+
         // Check if the refresh token is in the user's refresh tokens
         if (!user.refreshToken || !user.refreshToken.includes(refreshToken)) {
           console.error("Refresh token not found in user's refresh tokens");
           return res.status(401).send("Unauthorized - Invalid refresh token");
         }
-        
+
         // Generate new tokens
         const tokens = generateToken(user._id);
         if (!tokens) {
           console.error("Failed to generate new tokens");
-          return res.status(500).send("Server error - Failed to generate new tokens");
+          return res
+            .status(500)
+            .send("Server error - Failed to generate new tokens");
         }
-        
+
         // Update user's refresh tokens
-        user.refreshToken = user.refreshToken.filter(t => t !== refreshToken);
+        user.refreshToken = user.refreshToken.filter((t) => t !== refreshToken);
         user.refreshToken.push(tokens.refreshToken);
         await user.save();
-        
+
         // Set the new tokens in the response headers
         res.setHeader("new-access-token", tokens.accessToken);
         res.setHeader("new-refresh-token", tokens.refreshToken);
-        
+
         // Continue with the authenticated request
-        req.userId = user._id;
-        console.log(`User authenticated via token refresh: ${req.userId}`);
+        req.params.userId = user._id;
+        console.log(
+          `User authenticated via token refresh: ${req.params.userId}`
+        );
         return next();
       } catch (refreshErr) {
         console.error("Error refreshing token:", refreshErr);
-        return res.status(401).send("Unauthorized - Invalid or expired refresh token");
+        return res
+          .status(401)
+          .send("Unauthorized - Invalid or expired refresh token");
       }
     }
-    
+
     // Handle other verification errors
     if (err) {
       console.error("Auth error: Token verification failed", err);
@@ -349,16 +373,16 @@ export const authMiddleware = (
         return res.status(401).send(`Unauthorized - ${err.message}`);
       }
     }
-    
+
     // Validate payload
-    if (!payload || typeof payload !== 'object' || !('_id' in payload)) {
+    if (!payload || typeof payload !== "object" || !("_id" in payload)) {
       console.error("Auth error: Invalid payload structure", payload);
       return res.status(401).send("Unauthorized - Invalid token payload");
     }
-    
+
     // Authentication successful
-    req.userId = (payload as Payload)._id;
-    console.log(`User authenticated: ${req.userId}`);
+    req.params.userId = (payload as Payload)._id;
+    console.log(`User authenticated: ${req.params.userId}`);
     next();
   });
 };
@@ -408,7 +432,7 @@ const updateUser = async (req: Request, res: Response) => {
         return res.status(400).send("User name already exists");
       }
     }
-    
+
     console.log(updateData);
     const updatedUser = await userModel.findByIdAndUpdate(userId, updateData, {
       new: true,
@@ -427,7 +451,7 @@ const deleteUser = async (req: Request, res: Response) => {
     if (!user) {
       return res.status(404).send("User not found");
     }
-    
+
     const user1 = await userModel.findByIdAndDelete(userId);
     if (user1) {
       res.status(200).send("User deleted");
