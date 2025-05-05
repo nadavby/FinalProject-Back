@@ -124,12 +124,14 @@ Set isTextLikelyMatch to true only if there's strong evidence these are the same
    * Evaluate overall match confidence between lost and found items
    * @param lostItem The lost item
    * @param foundItem The found item
+   * @param textComparisonResult Result from text description comparison
    * @param visionSimilarityResult Result from vision API comparison
    * @returns Promise with confidence score (0-100)
    */
   async evaluateMatch(
     lostItem: IItem, 
-    foundItem: IItem, 
+    foundItem: IItem,
+    textComparisonResult: { isTextLikelyMatch: boolean, reason: string },
     visionSimilarityResult: { similarityScore: number }
   ): Promise<{ confidenceScore: number; reasoning: string }> {
     try {
@@ -153,6 +155,10 @@ Category: ${foundItem.category || 'N/A'}
 Location: ${JSON.stringify(foundItem.location) || 'N/A'}
 Date Found: ${(foundItem as IItemWithTimestamps).createdAt?.toLocaleString() || 'N/A'}
 Vision API Data: ${JSON.stringify(foundItem.visionApiData || {}, null, 2)}
+
+TEXT COMPARISON RESULT:
+Match Likelihood: ${textComparisonResult.isTextLikelyMatch ? 'Likely Match' : 'Not Likely Match'}
+Reasoning: ${textComparisonResult.reason}
 
 Vision API Similarity Score: ${visionSimilarityResult.similarityScore}/100
 
