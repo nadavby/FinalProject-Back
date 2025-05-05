@@ -8,7 +8,7 @@
     "testFile": "tsc && jest --detectOpenHandles --forceExit file.test.ts",
     "testItem": "tsc && jest --detectOpenHandles --forceExit --coverage item.test.ts",
     "testImageComparison": "tsc && jest --detectOpenHandles --forceExit --coverage image_comparison.test.ts",
-    "start": "tsc && node dist/src/index.js",
+    "start": "tsc && node dist/index.js",
     "dev": "nodemon ./src/index.ts",
     "prod": "cp ./.env_prod .env && tsc -p tsconfig_prod.json && pm2 restart ecosystem.config.js --env production",
     "lint": "eslint . --ext .ts",
