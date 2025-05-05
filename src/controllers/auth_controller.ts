@@ -1,11 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-
-
-
-
-
-
 import { NextFunction, Request, Response } from "express";
 import userModel from "../models/user_model";
 import bcrypt from "bcrypt";
@@ -266,7 +260,6 @@ export const authMiddleware = (
   const prefix = parts[0];
   const token = parts[1];
 
-  // Accept both 'Bearer' and 'JWT' prefixes
   if (prefix !== "Bearer" && prefix !== "JWT") {
     console.error(
       `Auth error: Invalid token prefix "${prefix}"`,
@@ -290,18 +283,14 @@ export const authMiddleware = (
     return;
   }
 
-  // Get the refresh token from the request, if present
   const refreshToken = req.header("refresh-token");
 
-  // Verify the JWT token
   jwt.verify(token, process.env.TOKEN_SECRET, async (err, payload) => {
-    // If token expired and we have a refresh token, try to refresh
     if (err && err.name === "TokenExpiredError" && refreshToken) {
       console.log(
         "Token expired, attempting refresh with provided refresh token"
       );
       try {
-        // Verify the refresh token
         const refreshPayload = jwt.verify(
           refreshToken,
           process.env.TOKEN_SECRET!
@@ -315,7 +304,6 @@ export const authMiddleware = (
           return res.status(401).send("Unauthorized - Invalid refresh token");
         }
 
-        // Find the user
         const user = await userModel.findOne({
           _id: (refreshPayload as Payload)._id,
         });
@@ -324,13 +312,11 @@ export const authMiddleware = (
           return res.status(401).send("Unauthorized - Invalid refresh token");
         }
 
-        // Check if the refresh token is in the user's refresh tokens
         if (!user.refreshToken || !user.refreshToken.includes(refreshToken)) {
           console.error("Refresh token not found in user's refresh tokens");
           return res.status(401).send("Unauthorized - Invalid refresh token");
         }
 
-        // Generate new tokens
         const tokens = generateToken(user._id);
         if (!tokens) {
           console.error("Failed to generate new tokens");
@@ -339,16 +325,13 @@ export const authMiddleware = (
             .send("Server error - Failed to generate new tokens");
         }
 
-        // Update user's refresh tokens
         user.refreshToken = user.refreshToken.filter((t) => t !== refreshToken);
         user.refreshToken.push(tokens.refreshToken);
         await user.save();
 
-        // Set the new tokens in the response headers
         res.setHeader("new-access-token", tokens.accessToken);
         res.setHeader("new-refresh-token", tokens.refreshToken);
 
-        // Continue with the authenticated request
         req.params.userId = user._id;
         console.log(
           `User authenticated via token refresh: ${req.params.userId}`
@@ -362,7 +345,6 @@ export const authMiddleware = (
       }
     }
 
-    // Handle other verification errors
     if (err) {
       console.error("Auth error: Token verification failed", err);
       if (err.name === "TokenExpiredError") {
@@ -374,13 +356,11 @@ export const authMiddleware = (
       }
     }
 
-    // Validate payload
     if (!payload || typeof payload !== "object" || !("_id" in payload)) {
       console.error("Auth error: Invalid payload structure", payload);
       return res.status(401).send("Unauthorized - Invalid token payload");
     }
 
-    // Authentication successful
     req.params.userId = (payload as Payload)._id;
     console.log(`User authenticated: ${req.params.userId}`);
     next();

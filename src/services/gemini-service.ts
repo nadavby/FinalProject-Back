@@ -1,7 +1,6 @@
 import { GoogleGenerativeAI, GenerativeModel } from "@google/generative-ai";
 import { IItem } from "../models/item_model";
 
-// Extend IItem to include Mongoose document properties
 type IItemWithTimestamps = IItem & {
   createdAt?: Date;
   updatedAt?: Date;
@@ -16,13 +15,7 @@ class GeminiService {
     this.genAI = new GoogleGenerativeAI(apiKey);
     this.model = this.genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
   }
-
-  /**
-   * Compare text descriptions of lost and found items to determine potential match
-   * @param lostItem The lost item
-   * @param foundItem The found item
-   * @returns Promise with result indicating if descriptions likely match
-   */
+  
   async compareDescriptions(lostItem: IItem, foundItem: IItem): Promise<{ isTextLikelyMatch: boolean, reason: string }> {
     try {
       const lostDescription = lostItem.description || '';
@@ -93,16 +86,12 @@ Set isTextLikelyMatch to true only if there's strong evidence these are the same
       const responseText = result.response.text().trim();
       
       try {
-        // Clean the response if it contains backticks or markdown formatting
         let cleanedResponse = responseText;
-        // Remove any markdown code blocks (```json ... ```)
         cleanedResponse = cleanedResponse.replace(/```json\s+|\s+```|```/g, '');
-        // Remove any stray backticks
         cleanedResponse = cleanedResponse.replace(/`/g, '');
         
         const parsedResponse = JSON.parse(cleanedResponse);
         
-        // Validate the response structure
         if (typeof parsedResponse.isTextLikelyMatch !== 'boolean' || typeof parsedResponse.reason !== 'string' || typeof parsedResponse.confidence !== 'number') {
           console.error("Invalid response structure from Gemini:", parsedResponse);
           return { isTextLikelyMatch: false, reason: "Error: Invalid response format from AI" };
@@ -120,14 +109,6 @@ Set isTextLikelyMatch to true only if there's strong evidence these are the same
     }
   }
 
-  /**
-   * Evaluate overall match confidence between lost and found items
-   * @param lostItem The lost item
-   * @param foundItem The found item
-   * @param textComparisonResult Result from text description comparison
-   * @param visionSimilarityResult Result from vision API comparison
-   * @returns Promise with confidence score (0-100)
-   */
   async evaluateMatch(
     lostItem: IItem, 
     foundItem: IItem,
@@ -261,22 +242,17 @@ Where:
       const responseText = result.response.text().trim();
       
       try {
-        // Clean the response if it contains backticks or markdown formatting
         let cleanedResponse = responseText;
-        // Remove any markdown code blocks (```json ... ```)
         cleanedResponse = cleanedResponse.replace(/```json\s+|\s+```|```/g, '');
-        // Remove any stray backticks
         cleanedResponse = cleanedResponse.replace(/`/g, '');
         
         const parsedResponse = JSON.parse(cleanedResponse);
         
-        // Validate and sanitize the response
         if (typeof parsedResponse.confidenceScore !== 'number' || typeof parsedResponse.reasoning !== 'string') {
           console.error("Invalid response structure from Gemini:", parsedResponse);
           return { confidenceScore: 0, reasoning: "" };
         }
         
-        // Ensure the confidence score is within valid range
         const confidenceScore = Math.min(100, Math.max(0, parsedResponse.confidenceScore));
         return { confidenceScore, reasoning: parsedResponse.reasoning };
       } catch (error) {
@@ -291,7 +267,6 @@ Where:
   }
 }
 
-// Create singleton instance
 const geminiService = new GeminiService();
 
 export default geminiService;

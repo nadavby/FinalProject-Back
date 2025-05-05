@@ -11,14 +11,12 @@ class AIMatchingService {
   ): Promise<{ item: IItem; confidenceScore: number }[]> {
     const matches: { item: IItem; confidenceScore: number }[] = [];
     
-    const compatibleItems = potentialMatches.filter(item => 
-      item.itemType !== targetItem.itemType
-    );
+
 
     console.log(`\n=== Starting Match Analysis ===`);
-    console.log(`Looking for matches between ${targetItem.itemType} item and ${compatibleItems.length} potential matches\n`);
+    console.log(`Looking for matches between ${targetItem.itemType} item and ${potentialMatches.length} potential matches\n`);
 
-    for (const potentialMatch of compatibleItems) {
+    for (const potentialMatch of potentialMatches) {
       try {
         const lostItem = targetItem.itemType === 'lost' ? targetItem : potentialMatch;
         const foundItem = targetItem.itemType === 'found' ? targetItem : potentialMatch;
