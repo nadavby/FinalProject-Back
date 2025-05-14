@@ -12,6 +12,7 @@ import swaggerUI from "swagger-ui-express";
 import fileRoutes from "./routes/file_routes";
 import itemRoutes from "./routes/item_routes";
 import imageComparisonRoutes from "./routes/image_comparison_routes";
+import notificationRoutes from "./routes/notification_routes";
 import cors from "cors";
 
 const corsOptions = {
@@ -41,6 +42,7 @@ app.use("/auth", authRoutes);
 app.use("/file", fileRoutes);
 app.use("/items", itemRoutes);
 app.use("/api/image-comparison", imageComparisonRoutes);
+app.use("/api/notifications", notificationRoutes);
 app.use("/public", express.static("public"));
 
 const options = {
