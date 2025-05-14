@@ -1,6 +1,5 @@
 import { Server } from 'socket.io';
 import { Server as HttpServer } from 'http';
-import { createNotification } from '../controllers/notification_controller';
 
 let io: Server;
 
@@ -24,12 +23,10 @@ export const initSocket = (server: HttpServer) => {
     socket.on('authenticate', (data) => {
       if (data && data.userId) {
         socket.join(data.userId); 
-        console.log(`User ${data.userId} authenticated and joined room`);
       }
     });
 
     socket.on('disconnect', () => {
-      console.log('User disconnected');
     });
   });
 
@@ -65,7 +62,7 @@ setInterval(() => {
 }, NOTIFICATION_COOLDOWN);
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const emitNotification = async (userId: string, notification: any) => {
+export const emitNotification = (userId: string, notification: any) => {
   try {
     const io = getIO();
     if (!io) {
@@ -91,23 +88,8 @@ export const emitNotification = async (userId: string, notification: any) => {
       ? 'match_notification' 
       : 'system_notification';
     
-    // Send real-time notification through Socket.IO
     io.to(userId).emit(eventName, notification);
-    console.log('Real-time notification emitted to user:', userId);
-    
-    // Save notification to database for persistence
-    try {
-      await createNotification(
-        userId,
-        notification.type,
-        notification.title || 'System Notification', 
-        notification.message || 'You have a new notification',
-        notification.data || {}
-      );
-      console.log('Notification saved to database for user:', userId);
-    } catch (dbError) {
-      console.error('Error saving notification to database:', dbError);
-    }
+    console.log('Notification emitted to user:', userId);
   } catch (error) {
     console.error('Error emitting notification:', error);
   }
