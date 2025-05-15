@@ -6,6 +6,7 @@ import userModel from "../models/user_model";
 import { enhanceItemWithAI } from "./image_comparison_controller";
 import { emitNotification } from "../services/socket.service";
 import matchingService from "../services/matching-service";
+import notificationModel from "../models/notification_model";
 
 const findPotentialMatches = async (
   item: IItem
@@ -52,14 +53,29 @@ const findPotentialMatches = async (
   }
 };
 
-const formatItemForUI = (item: IItem) => {
+const formatItemForUI = (item: IItem & { createdAt?: Date }) => {
+  let locationStr = '';
+  if (typeof item.location === 'string') {
+    locationStr = item.location;
+  } else if (item.location && typeof item.location === 'object') {
+    // אם יש שם עיר או אזור
+    if (item.location.city) {
+      locationStr = item.location.city;
+    } else if (item.location.region) {
+      locationStr = item.location.region;
+    } else if (item.location.lat && item.location.lng) {
+      locationStr = `Lat: ${item.location.lat.toFixed(4)}, Lng: ${item.location.lng.toFixed(4)}`;
+    }
+  }
   const formattedItem = {
     ...item,
     name: item.description || "",
     imgURL: item.imageUrl || "",
     id: item._id,
+    category: item.category || '',
+    location: locationStr || '',
+    date: item.eventDate || null,
   };
-
   return formattedItem;
 };
 
@@ -133,12 +149,13 @@ const uploadItem = async (req: Request, res: Response) => {
       imageUrl: req.body.imageUrl,
       itemType: req.body.itemType,
       description: req.body.description || "",
-      location: locationData || "", 
+      location: locationData || "",
       category: req.body.category || "",
       ownerName: user.userName,
       ownerEmail: user.email,
       visionApiData: visionApiData.visionApiData,
       isResolved: false,
+      eventDate: req.body.eventDate || req.body.date || null,
     };
 
     const savedItem = await itemModel.create(newItem);
@@ -162,16 +179,12 @@ const uploadItem = async (req: Request, res: Response) => {
     };
 
     try {
-      const highConfidenceMatches = potentialMatches.filter(
-        (match) => match.score > 70
-      );
-
-      if (highConfidenceMatches.length > 0) {
+      if (potentialMatches.length > 0) {
         console.log(
-          `Found ${highConfidenceMatches.length} high-confidence matches, sending notifications`
+          `Found ${potentialMatches.length} potential matches, sending notifications`
         );
 
-        for (const match of highConfidenceMatches) {
+        for (const match of potentialMatches) {
           const matchedItem = match.item;
           const matchOwner = await userModel.findById(matchedItem.userId);
 
@@ -191,6 +204,25 @@ const uploadItem = async (req: Request, res: Response) => {
               ownerEmail: matchedItem.ownerEmail,
             });
 
+            // שמירת התראה ב-db
+            await notificationModel.create({
+              userId: matchedItem.userId,
+              type: "MATCH_FOUND",
+              title: "Potential Match Found!",
+              message: `We found a potential match for your ${matchedItem.itemType} item!`,
+              data: {
+                itemId: matchedItem._id,
+                matchId: savedItem._id,
+                itemName: matchedItem.description,
+                matchName: savedItem.description,
+                itemImage: matchedItem.imageUrl,
+                matchImage: savedItem.imageUrl,
+                score: match.score,
+                ownerName: matchedItem.ownerName,
+                ownerEmail: matchedItem.ownerEmail,
+              },
+            });
+
             console.log(
               `Sent notification to user ${matchedItem.userId} (${matchOwner.email})`
             );
@@ -199,6 +231,41 @@ const uploadItem = async (req: Request, res: Response) => {
       }
     } catch (error) {
       console.error("Error notifying matched item owner:", error);
+    }
+
+    // שליחת התראה גם למשתמש שמאבד (רק אם יש התאמה)
+    if (potentialMatches && potentialMatches.length > 0) {
+      emitNotification(savedItem.userId, {
+        type: "MATCH_FOUND",
+        title: "Potential Match Found!",
+        message: `We found a potential match for your ${savedItem.itemType} item!`,
+        itemId: savedItem._id,
+        matchId: potentialMatches[0].item._id,
+        itemName: savedItem.description,
+        matchName: potentialMatches[0].item.description,
+        itemImage: savedItem.imageUrl,
+        matchImage: potentialMatches[0].item.imageUrl,
+        score: potentialMatches[0].score,
+        ownerName: savedItem.ownerName,
+        ownerEmail: savedItem.ownerEmail,
+      });
+      await notificationModel.create({
+        userId: savedItem.userId,
+        type: "MATCH_FOUND",
+        title: "Potential Match Found!",
+        message: `We found a potential match for your ${savedItem.itemType} item!`,
+        data: {
+          itemId: savedItem._id,
+          matchId: potentialMatches[0].item._id,
+          itemName: savedItem.description,
+          matchName: potentialMatches[0].item.description,
+          itemImage: savedItem.imageUrl,
+          matchImage: potentialMatches[0].item.imageUrl,
+          score: potentialMatches[0].score,
+          ownerName: savedItem.ownerName,
+          ownerEmail: savedItem.ownerEmail,
+        },
+      });
     }
 
     return res.status(201).json(response);
@@ -215,21 +282,18 @@ const getAllItems = async (req: Request, res: Response) => {
   try {
     const itemType = req.query.itemType as string;
     const userId = req.query.userId as string;
-
+    console.log('getAllItems - userId:', userId);
     const query: Record<string, unknown> = {};
-
     if (itemType && (itemType === "lost" || itemType === "found")) {
       query.itemType = itemType;
     }
-
     if (userId) {
       query.userId = userId;
     }
-
+    console.log('getAllItems - query:', query);
     const items = await itemModel.find(query);
-
+    console.log('getAllItems - items found:', items.length);
     const formattedItems = items.map(formatItemForUI);
-
     return res.status(200).json(formattedItems);
   } catch (error) {
     console.error("Error getting items:", error);
@@ -266,19 +330,41 @@ const resolveItem = async (req: Request, res: Response) => {
       return res.status(404).send("Item not found");
     }
 
-    if (item.userId !== req.body.userId) {
+    // אפשר לאשר התאמה אם המשתמש הוא הבעלים של אחד מהפריטים
+    let matchedItem = null;
+    if (item.matchedItemId) {
+      matchedItem = await itemModel.findById(item.matchedItemId);
+    }
+    const userId = req.body.userId;
+    if (item.userId !== userId && (!matchedItem || matchedItem.userId !== userId)) {
       return res.status(403).send("Not authorized to resolve this item");
     }
 
     item.isResolved = true;
     await item.save();
 
-    if (item.matchedItemId) {
-      const matchedItem = await itemModel.findById(item.matchedItemId);
-      if (matchedItem) {
-        matchedItem.isResolved = true;
-        await matchedItem.save();
-      }
+    if (matchedItem) {
+      matchedItem.isResolved = true;
+      await matchedItem.save();
+
+      // שליחת התראה לצד השני עם פרטי ההתקשרות
+      const otherUserId = item.userId === userId ? matchedItem.userId : item.userId;
+      const contactMethod = req.body.contactMethod;
+      const contactDetails = req.body.contactDetails;
+      const message = req.body.message;
+      await notificationModel.create({
+        userId: otherUserId,
+        type: "MATCH_CONFIRMED",
+        title: "Match Confirmed!",
+        message: `A match was confirmed. Contact details: ${contactDetails} (${contactMethod})`,
+        data: {
+          itemId: item._id,
+          matchedItemId: matchedItem._id,
+          contactMethod,
+          contactDetails,
+          message,
+        },
+      });
     }
 
     res.status(200).json(item);

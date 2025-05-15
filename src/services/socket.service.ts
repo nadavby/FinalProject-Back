@@ -1,5 +1,6 @@
 import { Server } from 'socket.io';
 import { Server as HttpServer } from 'http';
+import notificationModel from '../models/notification_model';
 
 let io: Server;
 
@@ -62,12 +63,26 @@ setInterval(() => {
 }, NOTIFICATION_COOLDOWN);
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const emitNotification = (userId: string, notification: any) => {
+export const emitNotification = async (userId: string, notification: any) => {
   try {
     const io = getIO();
     if (!io) {
       console.error('Socket.IO not initialized');
       return;
+    }
+
+    // שמירה ל-db
+    try {
+      await notificationModel.create({
+        userId,
+        type: notification.type,
+        title: notification.title,
+        message: notification.message,
+        data: notification.data || null,
+      });
+      console.log('Notification saved to DB for user:', userId);
+    } catch (err) {
+      console.error('Failed to save notification to DB:', err);
     }
 
     // Create unique key for this notification
