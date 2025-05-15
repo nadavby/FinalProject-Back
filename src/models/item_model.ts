@@ -8,8 +8,10 @@ export interface IItem {
   itemType: 'lost' | 'found';
   description?: string;
   location?: {
-    lat: number;
-    lng: number;
+    lat?: number;
+    lng?: number;
+    city?: string;
+    region?: string;
   } | string;
   category?: string;
   timestamp?: Date;
@@ -35,6 +37,7 @@ export interface IItem {
   };
   matchedItemId?: string;
   isResolved?: boolean;
+  eventDate: Date;
 }
 
 const itemSchema = new mongoose.Schema<IItem>(
@@ -91,6 +94,9 @@ const itemSchema = new mongoose.Schema<IItem>(
     isResolved: {
       type: Boolean,
       default: false,
+    },
+    eventDate: {
+      type: Date,
     },
   },
   { timestamps: true }

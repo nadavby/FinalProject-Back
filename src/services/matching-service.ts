@@ -23,6 +23,8 @@ const calculateDistanceInKm = (
   return R * c;
 };
 
+// פונקציה גלובלית לבדוק אם location תקין
+const validLocation = (loc: any) => typeof loc === 'object' && typeof loc.lat === 'number' && typeof loc.lng === 'number';
 
 export const shouldSkipComparison = (lostItem: IItem, foundItem: IItem): boolean => {
   if (lostItem.isResolved || foundItem.isResolved) return true;
@@ -37,7 +39,13 @@ export const shouldSkipComparison = (lostItem: IItem, foundItem: IItem): boolean
     return true;
   }
 
-  const distance = calculateDistanceInKm(lostItem.location, foundItem.location);
+  let distance = Infinity;
+  if (validLocation(lostItem.location) && validLocation(foundItem.location)) {
+    distance = calculateDistanceInKm(
+      { lat: (lostItem.location as any).lat, lng: (lostItem.location as any).lng },
+      { lat: (foundItem.location as any).lat, lng: (foundItem.location as any).lng }
+    );
+  }
   if (distance < Infinity && distance > 100) {
     return true;
   }
@@ -76,7 +84,13 @@ class MatchingService {
           score += 40;
         }
         
-        const distance = calculateDistanceInKm(lostItem.location, foundItem.location);
+        let distance = Infinity;
+        if (validLocation(lostItem.location) && validLocation(foundItem.location)) {
+          distance = calculateDistanceInKm(
+            { lat: (lostItem.location as any).lat, lng: (lostItem.location as any).lng },
+            { lat: (foundItem.location as any).lat, lng: (foundItem.location as any).lng }
+          );
+        }
         if (distance < Infinity) {
           const locationScore = Math.max(0, 40 - (distance * 0.4));
           score += locationScore;

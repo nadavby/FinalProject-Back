@@ -12,6 +12,7 @@ import {
 } from "../controllers/item_controller";
 import { authMiddleware } from "../controllers/auth_controller";
 import multer from "multer";
+import { getUserNotifications, markNotificationRead } from '../controllers/notification_controller';
 
 const router = express.Router();
 
@@ -567,5 +568,8 @@ router.delete("/:id", authMiddleware, deleteItem);
  *         description: Server error
  */
 router.get("/:itemId/matches", authMiddleware, findMatches);
+
+router.get('/notifications/:userId', getUserNotifications);
+router.patch('/notifications/read/:id', markNotificationRead);
 
 export = router;
