@@ -1,6 +1,5 @@
 import { Server } from 'socket.io';
 import { Server as HttpServer } from 'http';
-import notificationModel from '../models/notification_model';
 
 let io: Server;
 
@@ -62,50 +61,3 @@ setInterval(() => {
   }
 }, NOTIFICATION_COOLDOWN);
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const emitNotification = async (userId: string, notification: any) => {
-  try {
-    const io = getIO();
-    if (!io) {
-      console.error('Socket.IO not initialized');
-      return;
-    }
-
-    // שמירה ל-db
-    try {
-      await notificationModel.create({
-        userId,
-        type: notification.type,
-        title: notification.title,
-        message: notification.message,
-        data: notification.data || null,
-      });
-      console.log('Notification saved to DB for user:', userId);
-    } catch (err) {
-      console.error('Failed to save notification to DB:', err);
-    }
-
-    // Create unique key for this notification
-    const notificationKey = `${notification.type}_${notification.data?.matchedItemId || ''}_${Date.now()}`;
-    
-    // Check if we've recently sent a similar notification
-    const userNotifications = recentNotifications.get(userId) || new Set();
-    if (userNotifications.size > 0) {
-      // Don't send duplicate notifications within cooldown period
-      return;
-    }
-
-    // Track this notification
-    userNotifications.add(notificationKey);
-    recentNotifications.set(userId, userNotifications);
-    
-    const eventName = notification.type === 'MATCH_FOUND' 
-      ? 'match_notification' 
-      : 'system_notification';
-    
-    io.to(userId).emit(eventName, notification);
-    console.log('Notification emitted to user:', userId);
-  } catch (error) {
-    console.error('Error emitting notification:', error);
-  }
-}; 
