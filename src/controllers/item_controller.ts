@@ -75,6 +75,8 @@ const formatItemForUI = (item: IItem & { createdAt?: Date }) => {
     category: item.category || '',
     location: locationStr || '',
     date: item.eventDate || null,
+    itemType: item.itemType,
+    owner: item.userId
   };
   return formattedItem;
 };
