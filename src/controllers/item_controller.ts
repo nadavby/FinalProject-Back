@@ -4,7 +4,6 @@ import { Request, Response } from "express";
 import itemModel, { IItem } from "../models/item_model";
 import userModel from "../models/user_model";
 import { enhanceItemWithAI } from "./image_comparison_controller";
-import { emitNotification } from "../services/socket.service";
 import matchingService from "../services/matching-service";
 import notificationModel from "../models/notification_model";
 
@@ -28,23 +27,6 @@ const findPotentialMatches = async (
     const highConfidenceMatches = significantMatches.filter(
       (match) => match.score >= 75
     );
-    if (highConfidenceMatches.length > 0) {
-      const itemOwner = await userModel.findById(item.userId);
-
-      if (itemOwner) {
-        const notification = {
-          type: "MATCH_FOUND",
-          title: "New Potential Matches Found",
-          message: `We found ${highConfidenceMatches.length} potential match${highConfidenceMatches.length > 1 ? "es" : ""} for your ${item.itemType} item.`,
-          data: {
-            matchedItemId: item._id,
-            matchCount: highConfidenceMatches.length,
-            topScore: Math.max(...highConfidenceMatches.map((m) => m.score)),
-          },
-        };
-        emitNotification(itemOwner._id.toString(), notification);
-      }
-    }
 
     return significantMatches;
   } catch (error) {
@@ -181,30 +163,21 @@ const uploadItem = async (req: Request, res: Response) => {
     };
 
     try {
-      if (potentialMatches.length > 0) {
+      const highConfidenceMatches = potentialMatches.filter(
+        (match) => match.score > 70
+      );
+
+      if (highConfidenceMatches.length > 0) {
         console.log(
-          `Found ${potentialMatches.length} potential matches, sending notifications`
+          `Found ${highConfidenceMatches.length} high-confidence matches, sending notifications`
         );
 
-        for (const match of potentialMatches) {
+        for (const match of highConfidenceMatches) {
           const matchedItem = match.item;
           const matchOwner = await userModel.findById(matchedItem.userId);
 
+
           if (matchOwner) {
-            emitNotification(matchedItem.userId, {
-              type: "MATCH_FOUND",
-              title: "Potential Match Found!",
-              message: `We found a potential match for your ${matchedItem.itemType} item!`,
-              itemId: matchedItem._id,
-              matchId: savedItem._id,
-              itemName: matchedItem.description,
-              matchName: savedItem.description,
-              itemImage: matchedItem.imageUrl,
-              matchImage: savedItem.imageUrl,
-              score: match.score,
-              ownerName: matchedItem.ownerName,
-              ownerEmail: matchedItem.ownerEmail,
-            });
 
             // שמירת התראה ב-db
             await notificationModel.create({
@@ -237,20 +210,6 @@ const uploadItem = async (req: Request, res: Response) => {
 
     // שליחת התראה גם למשתמש שמאבד (רק אם יש התאמה)
     if (potentialMatches && potentialMatches.length > 0) {
-      emitNotification(savedItem.userId, {
-        type: "MATCH_FOUND",
-        title: "Potential Match Found!",
-        message: `We found a potential match for your ${savedItem.itemType} item!`,
-        itemId: savedItem._id,
-        matchId: potentialMatches[0].item._id,
-        itemName: savedItem.description,
-        matchName: potentialMatches[0].item.description,
-        itemImage: savedItem.imageUrl,
-        matchImage: potentialMatches[0].item.imageUrl,
-        score: potentialMatches[0].score,
-        ownerName: savedItem.ownerName,
-        ownerEmail: savedItem.ownerEmail,
-      });
       await notificationModel.create({
         userId: savedItem.userId,
         type: "MATCH_FOUND",
@@ -284,7 +243,6 @@ const getAllItems = async (req: Request, res: Response) => {
   try {
     const itemType = req.query.itemType as string;
     const userId = req.query.userId as string;
-    console.log('getAllItems - userId:', userId);
     const query: Record<string, unknown> = {};
     if (itemType && (itemType === "lost" || itemType === "found")) {
       query.itemType = itemType;
@@ -292,9 +250,7 @@ const getAllItems = async (req: Request, res: Response) => {
     if (userId) {
       query.userId = userId;
     }
-    console.log('getAllItems - query:', query);
     const items = await itemModel.find(query);
-    console.log('getAllItems - items found:', items.length);
     const formattedItems = items.map(formatItemForUI);
     return res.status(200).json(formattedItems);
   } catch (error) {
